@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <iomanip>
-#include <x86intrin.h>
 #include <string>
 #include <vector>
 #include <queue>
@@ -13,6 +12,7 @@
 #include <stdint.h>
 #include <algorithm>
 #include "../cujson_types.h"
+#include "../cujson_error.h"
 
 using namespace std;
 
@@ -603,8 +603,7 @@ string cuJSONLinesIterator::getKey(){
         // cout << "key---->" << key << endl;
         return key;
     }else{
-        cout << "ERROR! The iterator must point to a colon.";
-        exit(0);
+        throw cujson_error{cujson_err::INTERNAL};
     }
 }
 

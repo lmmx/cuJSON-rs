@@ -4,11 +4,10 @@
 #include <iostream>
 
 
-cuJSONInput loadJSON(const std::string& filePath) { 
+static cuJSONInput loadJSON(const std::string& filePath) { 
     // ______________________LOAD_FILE_____________________________
     std::ifstream file(filePath, std::ios::binary | std::ios::ate);                     // Open in binary mode, seek to end
     if (!file) {                                                                        // unable to open file
-        std::cerr << "\033[1;31m Error: Unable to open file: \033[0m \n" << filePath << std::endl;
         return {nullptr, 0};                                                            // Return nullptr and size 0
     }
     
@@ -21,7 +20,6 @@ cuJSONInput loadJSON(const std::string& filePath) {
     cudaHostAlloc((void**)&h_buffer, fileSize * sizeof(uint8_t), cudaHostAllocDefault); // allocate pinned memory
 
     if (!h_buffer) {                                                                    // Unable to allocate pinned memory!
-        std::cerr << "\033[1;31m Error: Unable to allocate pinned memory! \033[0m \n" << std::endl;
         file.close();           
         return {nullptr, 0};                                                            // Return nullptr and size 0
     }
@@ -35,7 +33,7 @@ cuJSONInput loadJSON(const std::string& filePath) {
     return {h_buffer, fileSize}; // Return the buffer and its size
 }
 
-cuJSONLinesInput loadJSONLines_chunkCount(const std::string& filePath, size_t chunkCount = 1) { 
+static cuJSONLinesInput loadJSONLines_chunkCount(const std::string& filePath, size_t chunkCount = 1) { 
     cuJSONLinesInput input; 
     input.data = nullptr;
     input.size = 0;
@@ -44,7 +42,6 @@ cuJSONLinesInput loadJSONLines_chunkCount(const std::string& filePath, size_t ch
     // ______________________LOAD_FILE_____________________________
     std::ifstream file(filePath, std::ios::binary | std::ios::ate);                     // Open in binary mode, seek to end
     if (!file) {                                                                        // unable to open file
-        std::cerr << "\033[1;31m Error: Unable to open file: \033[0m \n" << filePath << std::endl;
         return input;                                                                   // Return nullptr and size 0
     }
     
@@ -57,7 +54,6 @@ cuJSONLinesInput loadJSONLines_chunkCount(const std::string& filePath, size_t ch
     cudaHostAlloc((void**)&h_buffer, fileSize * sizeof(uint8_t), cudaHostAllocDefault); // allocate pinned memory
 
     if (!h_buffer) {                                                                    // Unable to allocate pinned memory!
-        std::cerr << "\033[1;31m Error: Unable to allocate pinned memory! \033[0m \n" << std::endl;
         file.close();           
         return input;                                                                   // Return nullptr and size 0
     }
@@ -106,7 +102,7 @@ cuJSONLinesInput loadJSONLines_chunkCount(const std::string& filePath, size_t ch
     return input; // Return the buffer and its size
 }
 
-cuJSONLinesInput loadJSONLines_chunkSizeBytes(const std::string& filePath, size_t chunkSizeBytes) {
+static cuJSONLinesInput loadJSONLines_chunkSizeBytes(const std::string& filePath, size_t chunkSizeBytes) {
     cuJSONLinesInput input;
     input.data = nullptr;
     input.size = 0;
@@ -114,7 +110,6 @@ cuJSONLinesInput loadJSONLines_chunkSizeBytes(const std::string& filePath, size_
     // ----------------- LOAD FILE -----------------
     std::ifstream file(filePath, std::ios::binary | std::ios::ate);
     if (!file) {
-        std::cerr << "\033[1;31m Error: Unable to open file: \033[0m \n" << filePath << std::endl;
         return input;
     }
 
@@ -125,7 +120,6 @@ cuJSONLinesInput loadJSONLines_chunkSizeBytes(const std::string& filePath, size_
     uint8_t* h_buffer;
     cudaHostAlloc((void**)&h_buffer, fileSize * sizeof(uint8_t), cudaHostAllocDefault);
     if (!h_buffer) {
-        std::cerr << "\033[1;31m Error: Unable to allocate pinned memory! \033[0m \n" << std::endl;
         file.close();
         return input;
     }
@@ -179,7 +173,7 @@ cuJSONLinesInput loadJSONLines_chunkSizeBytes(const std::string& filePath, size_
     return input;
 }
 
-cuJSONLinesInput loadJSONLines_chunkSizeMegaBytes(const std::string& filePath, size_t chunkSizeMegaBytes) {
+static cuJSONLinesInput loadJSONLines_chunkSizeMegaBytes(const std::string& filePath, size_t chunkSizeMegaBytes) {
     cuJSONLinesInput input;
     input.data = nullptr;
     input.size = 0;
@@ -188,7 +182,6 @@ cuJSONLinesInput loadJSONLines_chunkSizeMegaBytes(const std::string& filePath, s
     // ----------------- LOAD FILE -----------------
     std::ifstream file(filePath, std::ios::binary | std::ios::ate);
     if (!file) {
-        std::cerr << "\033[1;31m Error: Unable to open file: \033[0m \n" << filePath << std::endl;
         return input;
     }
 
@@ -199,7 +192,6 @@ cuJSONLinesInput loadJSONLines_chunkSizeMegaBytes(const std::string& filePath, s
     uint8_t* h_buffer;
     cudaHostAlloc((void**)&h_buffer, fileSize * sizeof(uint8_t), cudaHostAllocDefault);
     if (!h_buffer) {
-        std::cerr << "\033[1;31m Error: Unable to allocate pinned memory! \033[0m \n" << std::endl;
         file.close();
         return input;
     }

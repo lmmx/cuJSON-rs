@@ -1,6 +1,9 @@
 #include "parse_standard_json.h"         // Include the standard parse header
 #include "cujson_types.h"
+#include "cujson_error.h"
 
+
+namespace cujson_std {
 
 // prev1            --> 4 character
 // result           --> source
@@ -314,7 +317,6 @@ inline bool UTF8Validation(uint32_t * block_GPU, uint64_t size){
     cudaMemcpyAsync(&error, error_GPU, sizeof(uint32_t), cudaMemcpyDeviceToHost, 0);
     cudaFreeAsync(general_ptr, 0);
     if(error != 0){ 
-        printf("Incomplete ASCII!\n"); 
         //cudaFreeAsync(error_GPU, 0);
         //cudaFreeAsync(hastUTF8_GPU, 0);
         return false;
@@ -1568,17 +1570,32 @@ int32_t* Parser(uint8_t* open_close_GPU, int32_t** open_close_index_d,  int32_t*
     cudaMemcpyAsync(&pairError, pairError_GPU, sizeof(bool), cudaMemcpyDeviceToHost, 0);
 
     if(pairError){  // 0 no error, 1 error
-        printf("error found!");
-        exit(0);
+        // Free allocations owned by this function, plus the caller's
+        // open_close_GPU buffer (this function never returns it on this path).
+        // oc_idx (the open_close index buffer from Tokenize) and parsed_oc
+        // (the result buffer Tokenize allocated, never returned on this
+        // path) are also this function's responsibility here - neither
+        // caller sees them again once this throws.
+        cudaFreeAsync(pairError_GPU, 0);
+        cudaFreeAsync(open_close_GPU, 0);
+        cudaFreeAsync(depth, 0);
+        cudaFreeAsync(oc_idx, 0);
+        cudaFreeAsync(parsed_oc, 0);
+        throw cujson_error{cujson_err::UNBALANCED};
     }
 
 
 
     result_size = structural_cnt;
 
-
+    cudaFreeAsync(pairError_GPU, 0);
     cudaFreeAsync(open_close_GPU, 0);
     cudaFreeAsync(depth, 0);
+    // oc_idx (Tokenize's open_close index buffer) is done being read after
+    // validate_expand_MathAPI_new2 above; parsed_oc is NOT freed here - it
+    // is the result buffer, returned to the caller as result_GPU, which
+    // frees it after copying it to host memory.
+    cudaFreeAsync(oc_idx, 0);
 
     return (int32_t*) parsed_oc;
     //arr(output): ROW 1 depth (not anymore) | ROW1 Real Character Index | ROW2 End Index (for each opening)
@@ -1598,7 +1615,6 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
 
     // Check if the input is valid
     if (input.data == nullptr || input.size == 0) {
-        std::cerr << "\033[1;31m Error: Invalid JSON content or input.size. \033[0m\n";
         return cuJSONResult{};  // Return empty result
     }
 
@@ -1626,7 +1642,8 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     bool isValidUTF8 = UTF8Validation(reinterpret_cast<uint32_t *>(d_jsonContent), size_32);
     cudaStreamSynchronize(0);
     if(!isValidUTF8) {
-        exit(0);
+        cudaFree(d_jsonContent);
+        throw cujson_error{cujson_err::UTF8};
     }
 
 
@@ -1642,13 +1659,20 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     // Structure Recognition
     int32_t* result_GPU;
     int result_size;
-    result_GPU = Parser(open_close_GPU, 
-                        (int32_t **)(&open_close_index_GPU), 
-                        (int32_t **)(&tokens_index_GPU), 
-                        last_index_tokens_open_close, 
-                        last_index_tokens, 
-                        result_size,
-                        lastStructuralIndex);
+    try {
+        result_GPU = Parser(open_close_GPU,
+                            (int32_t **)(&open_close_index_GPU),
+                            (int32_t **)(&tokens_index_GPU),
+                            last_index_tokens_open_close,
+                            last_index_tokens,
+                            result_size,
+                            lastStructuralIndex);
+    } catch (const cujson_error&) {
+        // Parser() already freed its own allocations and open_close_GPU;
+        // d_jsonContent is still live in this frame.
+        cudaFree(d_jsonContent);
+        throw;
+    }
 
     // output_size = (uint32_t) result_size * ROW2;
     cudaFree(d_jsonContent); // Free the input memory on GPU
@@ -1665,6 +1689,7 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     // Copy results from device to host
     cudaMemcpy(1 + res_buff, result_GPU, sizeof(int32_t) * result_size, cudaMemcpyDeviceToHost);  // result 1
     cudaMemcpy(1 + res_buff + 1 + result_size, result_GPU + result_size, sizeof(int32_t) * result_size, cudaMemcpyDeviceToHost);  // result 2
+    cudaFreeAsync(result_GPU, 0);  // done with the device copy once it's on the host
 
     
     total_result_size += result_size;
@@ -1685,7 +1710,7 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
 
     // cout << "Total Result Size = " << parsed_tree.totalResultSize << endl;
     // cout << "File Size = " << parsed_tree.fileSize << endl;
-    cudaFree(input.data);
     return parsed_tree;
 }
 
+} // namespace cujson_std
