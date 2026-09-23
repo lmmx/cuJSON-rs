@@ -16,8 +16,22 @@
   frame first (parse_standard_json.cu:1572-1579,1633-1636,1650-1659; parse_json_lines.cu
   wraps stage3_parser's throw-through and the UTF8 branch to free `res_buf_arrays[0..i)`
   from earlier loop iterations, parse_json_lines.cu:1181-1189,1202-1213). `utils.cu`'s
-  `checkCuda()` still calls exit(1) directly - task 02's brief marks per-call CUDA error
+  `static void checkCuda(cudaError_t)` still calls exit(1) directly and has no callers
+  anywhere in the patched tree (grepped) - task 02's brief marks per-call CUDA error
   checking out of scope (task 03 checks once at the ABI boundary instead)
+- A follow-up patch (commit "upstream: free tokenizer index buffers on all paths") fixes
+  a device-memory leak found in review: `Parser()` (parse_standard_json.cu) and
+  `stage3_parser()` (parse_json_lines.cu) never freed `oc_idx` (Tokenize/stage2_tokenizer's
+  open_close index buffer) on either the success or the pairError-throw path, and never
+  freed `parsed_oc` (the tokens index buffer, later returned as `result_GPU`) on the
+  throw path. `parse_standard_json()` additionally never freed `result_GPU` itself after
+  copying it to `res_buff` on the success path (parse_json_lines.cu already did this per
+  chunk, at :1243). Both files now free `oc_idx` on every path and `parsed_oc` on the
+  throw path inside Parser/stage3_parser, and parse_standard_json.cu frees `result_GPU`
+  right after its two D2H `cudaMemcpy` calls. The commit body carries the full
+  allocation-by-allocation audit table. This can only be verified by source reading and
+  compilation here (tier 2) - the no-growth check (repeated parses not growing device
+  memory) is task 10's GPU runbook
 - No stdout/stderr output remains in `parse_standard_json.cu`, `parse_json_lines.cu`,
   `load_file.cu` or `utils.cu` except `checkCuda()`'s fprintf (same out-of-scope
   reasoning). `utils.cu` no longer defines 17 debug-dump functions
@@ -50,7 +64,8 @@
   the comment
 - `crates/cujson-sys/cuda/cujson_capi.h` is the plain-C ABI: `cujson_status` enum
   (OK/UTF8/UNBALANCED/INPUT_TOO_LARGE/CUDA/INTERNAL/EMPTY_INPUT), `cujson_tape` struct
-  (structural, pair_pos, len, depth, cuda_error, opaque `_alloc`), and
+  (structural, pair_pos, len, cuda_error, opaque `_alloc` - no `depth` field, see
+  Divergence), and
   cujson_parse_standard/cujson_parse_lines/cujson_tape_free/cujson_status_str/
   cujson_cuda_runtime_version/cujson_device_count/cujson_device_name/
   cujson_compiled_archs. `cc -fsyntax-only -x c` passes (tier 1)
@@ -109,11 +124,11 @@
 
 ## Missing
 
-- `cuJSONResult::depth` (cujson_types.h) is never assigned by either upstream parser -
-  confirmed by grep, no `.depth =` or `->depth =` anywhere in parse_standard_json.cu or
-  parse_json_lines.cu. `cujson_tape.depth` in the shim carries this uninitialized `int`
-  through unchanged; not a task 02/03 regression, an existing upstream gap, out of
-  scope for lane A
+- No `cujson_tape` field carries a parse's max depth - `cuJSONResult::depth`
+  (cujson_types.h) is never assigned by either upstream parser (confirmed by grep, no
+  `.depth =` or `->depth =` anywhere in parse_standard_json.cu or parse_json_lines.cu),
+  so the field was removed from the shim rather than exposing an indeterminate int
+  (see Divergence). A depth, if needed, is computed host-side from the tape
 - No test in this lane calls a `cujson_*` FFI function - `tests/layout.rs` only checks
   layout via a separate `cc` compile. The first real call happens in task 06 or task
   10's GPU runbook
@@ -138,3 +153,7 @@
 - `docs/plan/03-capi-shim.md` doesn't specify `chunk_bytes == 0` behavior for
   `cujson_parse_lines`; this shim treats it as "one chunk for the whole input" rather
   than an error
+- `docs/plan/03-capi-shim.md`'s proposed `cujson_tape` includes a `depth` field; removed
+  after review found upstream never writes `cuJSONResult::depth`, so the shim would
+  have been copying an indeterminate int. Not present in `cujson_capi.h`, src/lib.rs,
+  capi_standard.cu/capi_lines.cu/capi_common.cu or tests/layout.rs
