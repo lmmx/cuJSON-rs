@@ -130,12 +130,24 @@ fn verify_without_cuda_feature_gives_clean_message_and_exit_2() {
         .stderr(predicate::str::contains("cuda"));
 }
 
-// --- built with `cuda` but no driver/device in this container: still a
-// clean error, not a panic, distinct from a plain FAIL.
+// --- built with `cuda` on a host where CUDA is unusable: still a clean
+// error, not a panic, distinct from a plain FAIL. Skipped when a GPU is usable.
+
+#[cfg(feature = "cuda")]
+fn gpu_usable() -> bool {
+    let usable = cujson::cuda_info().is_ok();
+    if usable {
+        eprintln!("skipped: a usable GPU is present");
+    }
+    usable
+}
 
 #[cfg(feature = "cuda")]
 #[test]
 fn info_with_cuda_feature_but_no_driver_errors_cleanly() {
+    if gpu_usable() {
+        return;
+    }
     let assert = cli().arg("info").assert().failure();
     let output = assert.get_output();
     assert!(
@@ -147,6 +159,9 @@ fn info_with_cuda_feature_but_no_driver_errors_cleanly() {
 #[cfg(feature = "cuda")]
 #[test]
 fn verify_with_cuda_feature_but_no_driver_gives_exit_2() {
+    if gpu_usable() {
+        return;
+    }
     cli()
         .arg("verify")
         .assert()

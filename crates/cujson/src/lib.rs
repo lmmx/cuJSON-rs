@@ -320,13 +320,23 @@ mod tests_no_cuda {
 
 #[cfg(all(test, feature = "cuda"))]
 mod tests_cuda_no_device {
-    //! This container has no NVIDIA driver installed (task 06 brief). These
-    //! tests confirm the graceful-error path at tier 2 (compiled with
-    //! `cuda`, run with no GPU) rather than a panic or crash — they do not
-    //! confirm GPU behavior (tier 3, `crates/cujson/tests/gpu.rs`).
+    //! The graceful-error path when CUDA is unusable (no driver or device):
+    //! an `Err`, not a panic. On a host with a usable GPU there is nothing
+    //! to test, so each test returns early.
+
+    fn gpu_usable() -> bool {
+        let usable = super::cuda_info().is_ok();
+        if usable {
+            eprintln!("skipped: a usable GPU is present");
+        }
+        usable
+    }
 
     #[test]
     fn cuda_info_errors_without_a_driver() {
+        if gpu_usable() {
+            return;
+        }
         let result = super::cuda_info();
         assert!(
             result.is_err(),
@@ -336,6 +346,9 @@ mod tests_cuda_no_device {
 
     #[test]
     fn parse_errors_without_a_driver() {
+        if gpu_usable() {
+            return;
+        }
         let result = super::parse(b"{}");
         assert!(
             result.is_err(),
