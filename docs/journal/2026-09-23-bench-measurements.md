@@ -42,6 +42,13 @@ Setup for every row: committed file (1,818 rows, 233.4 MB of JSON Lines), 20 CPU
 - Local pipeline copies range from 13 MB (`chunk_2-00114-of-00144`) to 751 MB (`chunk_0-00000-of-00546`) of parquet; the ten largest are all chunk_0 files of 488 MB to 751 MB
 
 
+### Branch `skip-chunk-scan` (d6033c5), chunking pass removed, 32 MB batches, pinned input, RTX 3090
+
+- `cujson-visit-par` `run --levels parse,walk`: `Parse` 0.038 s (6.07 GB/s, `gpu parse` 0.038 s, +141 MB RSS); `Walk` 0.073 s (`gpu parse` 0.034 s, `walk` 0.038 s, +129 MB RSS)
+- `cujson-pipe` walk: 0.047 s (4.97 GB/s, +169 MB RSS), `parse busy` 0.040 s, `walk busy` 0.040 s, against 0.054 s with `parse busy` 0.049 s and `walk busy` 0.038 s to 0.040 s at `master` d094037
+- `gpu parse` of the whole file read 0.045 s in the `nsys` run at d094037 and 0.034 s to 0.038 s at d6033c5; the `--include-ignored` tests passed at d6033c5
+
+
 ### Batch-size sweeps
 
 - `simd-par` at 4, 8, 16, 32, 64, 128, 256 MB batches (commit 63a7ea2 era, then earlier for 4 and 8): 0.154, 0.146, 0.126 (0.123 on a later run), 0.110, 0.148, 0.147, 0.140 s, with the `copy` phase 0.018, 0.022, 0.019, 0.019, 0.066, 0.071, 0.068 s
