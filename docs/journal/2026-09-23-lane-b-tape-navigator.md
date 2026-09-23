@@ -92,10 +92,43 @@
   `str::parse::<i64>`/`u64` and floats with `str::parse::<f64>` +
   `serde_json::Number::from_f64`
 
+- A reviewer found that this journal's first FORMAT.md revision had two real
+  citation errors, both fixed in commits `1fe5f06`/`f6d4f5b`/`588cf05`:
+  (1) §1 cited `bitMapCreator` (`parse_standard_json.cu:330-400`), which is
+  never launched — the live call is `bitMapCreatorSimd` at line 1095, with a
+  `\n`-including variant of its structural class commented out at
+  `:481-484,528-530` (so the "no `\n` in Standard mode" conclusion was right,
+  the citation wasn't); and (2) §5 claimed JSON Lines mode "reuses the same
+  tokenizer/parser pipeline" as Standard mode and called
+  `stage2_tokenizer`/`stage3_parser` "not fully read" — both wrong:
+  `parse_json_lines.cu` has its own distinct kernel set (its own
+  `bitMapCreatorSimd`, whose structural class *does* include `0x0A` live,
+  unlike Standard mode's) and both functions are fully defined in that file.
+  §5 was rewritten against the real launches; the former Unresolved #5
+  (global-offset claim) is now resolved by direct inspection of
+  `extractStructuralIdx:792` and `validate_expand:983,995-996,1007-1008`.
+- Also resolved during the fix: `cuJSONResult::depth` (FORMAT.md §4) is now a
+  finding, not an open question — grep confirms upstream never writes it (only
+  an unrelated local variable of the same name in both files), and both
+  `cuJSONResult` construction sites are default-, not value-, initialized on
+  the success path, so the field is indeterminate garbage upstream. The Rust
+  builder's own `depth` (documented in `storage.rs`) has no GPU counterpart
+  and is excluded, not masked, from task 10's differential test.
+- `build_lines` in `builder.rs` no longer splits the input by line at the
+  Rust level. It now runs a single `scan_structural` pass over the whole
+  input with newline-marking enabled, reproducing the kernel's
+  unconditional per-`\n` structural marking exactly — including a trailing
+  `\n` at EOF and blank lines (`\n\n`), which the earlier per-line
+  implementation silently collapsed/dropped. `Document::lines()` filters the
+  resulting empty scalar spans at the navigator layer instead. Four new
+  tests (`crates/cujson/tests/tape_tests.rs`) cover trailing EOF newline,
+  blank lines, CRLF, and chunk-boundary irrelevance (FORMAT.md §5's four
+  newline cases — all four turned out to be determinable from source, none
+  needed an `Error` fallback).
+
 CPU-vs-GPU tape byte-for-byte equality is **UNVERIFIED** — everything above
 was derived from static reading of the CUDA/C++ source with no GPU in this
 container. It is a hypothesis until task 10's differential runbook confirms
 it on a GPU box (tier 3); FORMAT.md's Unresolved section lists the specific
-points (undefined `pair_pos` slots, unlocated `depth` write site, unverified
-`stage2_tokenizer` global-offset behaviour for JSON Lines) that a
-differential test cannot assert on even then.
+points (undefined `pair_pos` slots) that a differential test cannot assert
+on even then.
