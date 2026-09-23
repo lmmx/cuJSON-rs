@@ -1,0 +1,133 @@
+//! Safe wrappers over `cujson-sys`'s `unsafe extern "C"` functions.
+//!
+//! cuJSON uses the default CUDA stream and keeps no per-call state
+//! (`docs/plan/README.md`'s "Concurrency" row), so every entry point here
+//! serializes on one process-wide `Mutex` — never call the raw
+//! `cujson_sys` functions directly from elsewhere in this crate.
+
+use std::ffi::CStr;
+use std::sync::{Mutex, MutexGuard};
+
+use cujson_sys as sys;
+
+use crate::error::Error;
+use crate::tape::{Tape, tape_from_ffi};
+use crate::{CudaInfo, DeviceInfo};
+
+static GPU_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock() -> MutexGuard<'static, ()> {
+    GPU_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn status_message(status: sys::cujson_status) -> String {
+    unsafe {
+        let ptr = sys::cujson_status_str(status);
+        if ptr.is_null() {
+            format!("cujson_status {status}")
+        } else {
+            CStr::from_ptr(ptr).to_string_lossy().into_owned()
+        }
+    }
+}
+
+fn map_error(status: sys::cujson_status, out: &sys::cujson_tape) -> Error {
+    match status {
+        sys::CUJSON_ERR_UTF8 => Error::InvalidUtf8,
+        sys::CUJSON_ERR_UNBALANCED => Error::Unbalanced,
+        sys::CUJSON_ERR_EMPTY_INPUT => Error::EmptyInput,
+        // Rust's own size check (crate::check_size) runs before every FFI
+        // call, so this status should be unreachable in practice; mapped
+        // defensively rather than treated as Internal so a future change
+        // to that check doesn't silently misreport it.
+        sys::CUJSON_ERR_INPUT_TOO_LARGE => Error::InputTooLarge {
+            len: 0,
+            max: crate::MAX_INPUT_LEN,
+        },
+        sys::CUJSON_ERR_CUDA => Error::Cuda {
+            code: out.cuda_error,
+            message: format!("CUDA runtime error (cudaError {})", out.cuda_error),
+        },
+        _ => {
+            let _ = status_message(status); // best-effort, ignored if unrecognized
+            Error::Internal
+        }
+    }
+}
+
+pub(crate) fn parse_standard(data: &[u8]) -> Result<Tape, Error> {
+    let _guard = lock();
+    let mut out = sys::cujson_tape::default();
+    let status = unsafe { sys::cujson_parse_standard(data.as_ptr(), data.len(), &mut out) };
+    if status != sys::CUJSON_OK {
+        return Err(map_error(status, &out));
+    }
+    Ok(tape_from_ffi(out))
+}
+
+pub(crate) fn parse_lines(data: &[u8], chunk_bytes: usize) -> Result<Tape, Error> {
+    let _guard = lock();
+    let mut out = sys::cujson_tape::default();
+    let status =
+        unsafe { sys::cujson_parse_lines(data.as_ptr(), data.len(), chunk_bytes, &mut out) };
+    if status != sys::CUJSON_OK {
+        return Err(map_error(status, &out));
+    }
+    Ok(tape_from_ffi(out))
+}
+
+pub(crate) fn cuda_info() -> Result<CudaInfo, Error> {
+    let _guard = lock();
+
+    let version = unsafe { sys::cujson_cuda_runtime_version() };
+    if version < 0 {
+        return Err(Error::Cuda {
+            code: -version,
+            message: format!("cudaRuntimeGetVersion failed (cudaError {})", -version),
+        });
+    }
+
+    let count = unsafe { sys::cujson_device_count() };
+    if count < 0 {
+        // On a machine with no NVIDIA driver at all this is the graceful
+        // path: cudaGetDeviceCount returns an error code (typically
+        // cudaErrorInsufficientDriver/cudaErrorNoDevice) rather than
+        // crashing, so this becomes an `Err`, never a panic.
+        return Err(Error::Cuda {
+            code: -count,
+            message: format!("cudaGetDeviceCount failed (cudaError {})", -count),
+        });
+    }
+    if count == 0 {
+        return Err(Error::NoDevice);
+    }
+
+    let mut devices = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        let mut buf = [0 as core::ffi::c_char; 256];
+        let status = unsafe { sys::cujson_device_name(index, buf.as_mut_ptr(), buf.len()) };
+        let name = if status == sys::CUJSON_OK {
+            unsafe { CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned() }
+        } else {
+            format!("<unknown: {}>", status_message(status))
+        };
+        devices.push(DeviceInfo { index, name });
+    }
+
+    let compiled_archs = unsafe {
+        let ptr = sys::cujson_compiled_archs();
+        if ptr.is_null() {
+            String::new()
+        } else {
+            CStr::from_ptr(ptr).to_string_lossy().into_owned()
+        }
+    };
+
+    Ok(CudaInfo {
+        runtime_version: version,
+        devices,
+        compiled_archs,
+    })
+}
