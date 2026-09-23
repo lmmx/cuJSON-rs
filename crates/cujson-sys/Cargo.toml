@@ -1,0 +1,16 @@
+[package]
+name = "cujson-sys"
+links = "cujson"
+build = "build.rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Raw FFI bindings to cuJSON, compiled with nvcc when the `cuda` feature is on"
+
+[features]
+cuda = ["dep:cudaforge"]
+
+[build-dependencies]
+cudaforge = { workspace = true, optional = true }

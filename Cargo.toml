@@ -1,0 +1,22 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/lmmx/cuJSON-rs"
+description = "GPU JSON parsing with cuJSON (ASPLOS '26), packaged for Rust and Python"
+
+[workspace.dependencies]
+cujson-sys = { path = "crates/cujson-sys", version = "0.1.0" }
+cujson = { path = "crates/cujson", version = "0.1.0" }
+cudaforge = "=0.1.6"
+serde_json = "1"
+proptest = "1"
+pyo3 = "0.29"
+clap = { version = "4", features = ["derive"] }
+assert_cmd = "2"
+predicates = "3"

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cujson"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+]
+dynamic = ["version", "description"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+module-name = "cujson._cujson"
+python-source = "python"
+features = ["pyo3/extension-module"]
+include = ["python/cujson/py.typed", "python/cujson/*.pyi"]
+
+[tool.pytest.ini_options]
+markers = ["gpu: requires a CUDA device (skipped unless CUJSON_TEST_GPU=1)"]

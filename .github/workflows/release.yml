@@ -1,0 +1,226 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build the full matrix but upload nothing (no GitHub release, crates.io, or PyPI)."
+        required: false
+        default: true
+        type: boolean
+
+permissions: {}
+
+jobs:
+  cli:
+    name: CLI (cuda${{ matrix.cuda_major }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: nvidia/cuda:${{ matrix.cuda_image }}-devel-ubuntu22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # CUDA 13 only; CUDA 12 users build from source.
+        include:
+          - cuda_major: 13
+            cuda_image: "13.0.0"
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates build-essential pkg-config git
+          rm -rf /var/lib/apt/lists/*
+
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-cli-cuda${{ matrix.cuda_major }}
+
+      - name: Build CLI (release, cuda)
+        run: cargo build --release -p cujson-cli --features cuda
+
+      - name: Assert static cudart (no libcudart in ldd)
+        run: |
+          set -eu
+          bin=target/release/cujson
+          if ldd "$bin" | grep -qi libcudart; then
+            echo "::error::$bin links libcudart dynamically; cudart_static expected"
+            ldd "$bin"
+            exit 1
+          fi
+          ldd "$bin"
+
+      - name: Package
+        run: |
+          set -eu
+          name="cujson-cu${{ matrix.cuda_major }}-x86_64-unknown-linux-gnu.tar.gz"
+          tar czf "$name" -C target/release cujson
+          echo "ASSET=$name" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-cu${{ matrix.cuda_major }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  wheel:
+    name: Wheel (cuda${{ matrix.cuda_major }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      # manylinux_2_28 (AlmaLinux 8 base) rather than the nvidia/cuda Ubuntu images, which only
+      # yield manylinux_2_35 wheels (task 09 brief). CUDA toolkit installed from NVIDIA's RHEL8
+      # repo below instead of coming baked into the image.
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        # CUDA 13 only; CUDA 12 users build from source.
+        include:
+          - cuda_major: 13
+            cuda_dash: "13-0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CUDA toolkit from NVIDIA RHEL8 repo
+        run: |
+          set -eu
+          dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
+          dnf install -y \
+            cuda-nvcc-${{ matrix.cuda_dash }} \
+            cuda-cudart-devel-${{ matrix.cuda_dash }} \
+            cuda-cccl-${{ matrix.cuda_dash }}
+          echo "CUDA_HOME=/usr/local/cuda-$(echo ${{ matrix.cuda_dash }} | tr - .)" >> "$GITHUB_ENV"
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install maturin
+        run: pip3.12 install maturin
+
+      - name: Build wheel
+        run: |
+          source "$HOME/.cargo/env"
+          maturin build --release -m crates/cujson-py/Cargo.toml --out dist
+
+      - name: Install auditwheel
+        run: pip3.12 install auditwheel
+
+      - name: Assert no bundled CUDA libs other than libcuda
+        run: |
+          set -eu
+          whl=$(ls dist/*.whl | head -1)
+          report=$(auditwheel show "$whl")
+          echo "$report"
+          # cudart_static means no libcudart etc.; libcuda itself is dlopen'd at runtime by the
+          # driver stub, never bundled, so it must not appear in the report either.
+          if echo "$report" | grep -Eio 'lib(cudart|cublas|curand|cufft|cusolver|cusparse|nvrtc|cuda)[^ ]*'; then
+            echo "::error::wheel bundles a CUDA library; static cudart expected to leave none"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cu${{ matrix.cuda_major }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  crate-package-check:
+    name: cargo package check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: List and size-check cujson-sys package
+        run: |
+          set -eu
+          cargo package -p cujson-sys --allow-dirty --no-verify --list
+          cargo package -p cujson-sys --allow-dirty --no-verify
+          size=$(stat -c%s target/package/cujson-sys-*.crate)
+          echo "cujson-sys .crate size: $size bytes"
+          if [ "$size" -gt 10485760 ]; then
+            echo "::error::cujson-sys package exceeds crates.io's 10 MB limit"
+            exit 1
+          fi
+
+  github-release:
+    name: Upload GitHub release assets
+    needs: [cli, wheel]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: dist-cli
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist-wheel
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            dist-cli/*.tar.gz
+            dist-wheel/*.whl
+
+  pypi-publish:
+    name: Publish wheels to PyPI
+    needs: [wheel]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  crates-publish:
+    name: Publish to crates.io
+    needs: [crate-package-check, cli, wheel]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # crates.io trusted publishing: exchanged for a short-lived token below.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish cujson-sys
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish -p cujson-sys
+      - name: Publish cujson
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish -p cujson

@@ -1,0 +1,19 @@
+[package]
+name = "cujson-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish = false
+
+[lib]
+name = "cujson"
+crate-type = ["cdylib"]
+doc = false
+
+[dependencies]
+# Always CUDA: a cuJSON wheel without a GPU parser has nothing to offer.
+cujson = { workspace = true, features = ["cuda", "serde"] }
+pyo3 = { workspace = true, features = ["abi3-py310", "extension-module"] }

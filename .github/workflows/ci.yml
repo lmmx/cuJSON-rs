@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    name: Check (no CUDA)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all --check
+
+      # cujson-py always builds with CUDA; this runner has no toolkit, so it
+      # is covered by cuda-compile instead.
+      - name: clippy
+        run: cargo clippy --workspace --exclude cujson-py -- -D warnings
+
+      - name: test
+        run: cargo test --workspace --exclude cujson-py
+
+  cuda-compile:
+    name: CUDA compile (${{ matrix.cuda }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: nvidia/cuda:${{ matrix.cuda }}-devel-ubuntu22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda: "12.8.1"
+            archs: "80"
+          - cuda: "13.0.0"
+            archs: ""
+    # archs "" leaves CUJSON_CUDA_ARCHS unset so build.rs uses the full default arch list,
+    # proving the full matrix compiles at least once; the 12.8.1 leg pins one arch for speed.
+    env:
+      CUJSON_CUDA_ARCHS: ${{ matrix.archs }}
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates build-essential pkg-config git
+          rm -rf /var/lib/apt/lists/*
+
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cuda-${{ matrix.cuda }}
+
+      - name: clippy (cuda)
+        run: cargo clippy --workspace --features cuda -- -D warnings
+
+      - name: build (cuda)
+        run: cargo build --workspace --features cuda
+
+      - name: test (cuda, GPU tests ignored)
+        run: cargo test --workspace --features cujson/cuda
+
+      - name: Assert static cudart (no libcudart in ldd)
+        run: |
+          set -eu
+          bin=target/debug/cujson
+          if [ ! -x "$bin" ]; then
+            echo "::error::CLI binary not found at $bin"
+            exit 1
+          fi
+          if ldd "$bin" | grep -qi libcudart; then
+            echo "::error::$bin links libcudart dynamically; cudart_static expected"
+            ldd "$bin"
+            exit 1
+          fi
+          ldd "$bin"
+
+      - uses: astral-sh/setup-uv@v6
+
+      # No GPU here: pytest's no-driver test expects CudaError from every entry point.
+      - name: Python wheel + pytest
+        run: |
+          uv venv
+          uv pip install ./crates/cujson-py pytest
+          uv run --no-project pytest crates/cujson-py/tests
