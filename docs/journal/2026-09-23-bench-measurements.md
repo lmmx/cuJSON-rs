@@ -29,7 +29,7 @@ Setup for every row: committed file (1,818 rows, 233.4 MB of JSON Lines), 20 CPU
 ### Batch-size sweeps
 
 - `simd-par` at 4, 8, 16, 32, 64, 128, 256 MB batches (commit 63a7ea2 era, then earlier for 4 and 8): 0.154, 0.146, 0.126 (0.123 on a later run), 0.110, 0.148, 0.147, 0.140 s, with the `copy` phase 0.018, 0.022, 0.019, 0.019, 0.066, 0.071, 0.068 s
-- `cujson-visit-par` before ed01209 fixes to the copy path, at 4, 8, 16, 32, 64, 128, 256 MB: 0.316, 0.243, 0.202, 0.172, 0.165, 0.160, 0.155 s
+- `cujson-visit-par` at ed01209 (before ce7ae93), at 4, 8, 16, 32, 64, 128, 256 MB: 0.316, 0.243, 0.202, 0.172, 0.165, 0.160, 0.155 s
 - After 63a7ea2, `cujson-visit-par` at 16, 32, 64, 128, 256 MB: 0.137, 0.113, 0.113, 0.106, 0.102 s; `cujson-pipe` 0.085, 0.080, 0.082, 0.092, 0.101 s
 - `gpu parse` of the whole file stays near 0.100 s for batches of 32 MB and larger before ce7ae93 (0.102, 0.102, 0.101, 0.098 s at 32, 64, 128, 256 MB)
 - At 256 MB the file is one batch, so `cujson-pipe` cannot overlap and equals `cujson-visit-par` (0.101 s against 0.102 s)
