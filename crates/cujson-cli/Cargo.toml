@@ -1,0 +1,19 @@
+[package]
+name = "cujson-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish = false
+
+[[bin]]
+name = "cujson"
+path = "src/main.rs"
+
+[features]
+cuda = ["cujson/cuda"]
+
+[dependencies]
+cujson.workspace = true
