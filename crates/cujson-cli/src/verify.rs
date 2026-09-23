@@ -213,6 +213,16 @@ pub fn run(file: Option<PathBuf>, lines: bool, chunk_bytes: Option<usize>) -> Ex
                     SMALL_RECORDS,
                     4096,
                 );
+                // Inputs or chunks with no brackets skip upstream's
+                // bracket-pairing stage, whose launches need a nonzero grid.
+                verify_lines(
+                    &mut checks,
+                    "blank and scalar lines (lines, one line per chunk)",
+                    b"[1]\n\n2\n\"x\"\n{\"a\":null}\n",
+                    1,
+                );
+                verify_standard(&mut checks, "top-level number (standard)", b"42");
+                verify_standard(&mut checks, "top-level string (standard)", b" \"s\" ");
             }
         }
 
