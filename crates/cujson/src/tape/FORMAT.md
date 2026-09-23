@@ -13,7 +13,16 @@ site computing it was located in this task's reading; see Unresolved).
 ## 1. Structural character set
 
 A byte is a candidate structural character iff it is one of `{ } [ ] : ,`
-(`parse_standard_json.cu:393-400`, the `res_op` bitmap in `bitMapCreator`). Bytes inside
+(`parse_standard_json.cu:447-571`, the `res_op` bitmap built by `bitMapCreatorSimd` —
+this is the kernel actually launched, at `parse_standard_json.cu:1095`; the earlier,
+never-launched `bitMapCreator` at `parse_standard_json.cu:330-400` is dead code and must
+not be cited). `res_op`'s candidate set is `{ } [ ] : ,` only: the bracket class is built
+at `parse_standard_json.cu:475-479`/`600-604` (`temp_open_close`/`temp2_open_close`) and
+the colon/comma class at `:485-487`/`532-534` (`temp_colon_comma`/`temp2_colon_comma`);
+a `\n`-including variant of that colon/comma class exists in the source but is commented
+out (`parse_standard_json.cu:481-484`, `528-530`) and never executes. So the conclusion
+holds unchanged: in Standard mode the structural set is exactly `{ } [ ] : ,`, and `\n`
+is never itself structural. Bytes inside
 a JSON string — including an escaped quote `\"` — are excluded: `findEscapedQuoteMerge_NEW`
 computes `real_quote_GPU` as the set of *unescaped* quote bytes, handling runs of
 backslashes with the standard odd/even-count rule (`parse_standard_json.cu:767-831`);
@@ -23,10 +32,15 @@ set with the complement of that mask: `inString_GPU[k] = ~in_string & all_struct
 (`parse_standard_json.cu:925-929`). So the final structural set is exactly the `{ } [ ] : ,`
 bytes that lie outside any string body.
 
-Whitespace (space, tab, CR, LF, or any other byte) is never itself structural except LF,
-which is folded into the newline bitmap (`newLine_GPU`, `parse_standard_json.cu:379,392`)
-and used only by the JSON-Lines path (§5) — it does not appear in `res_op`/`all_structural`
-for the single-document parser.
+Whitespace (space, tab, CR, LF, or any other byte) is never itself structural in Standard
+mode, full stop — including LF. `bitMapCreatorSimd`'s `open_close_GPU` output
+(`parse_standard_json.cu:503,569`, misleadingly commented `// \n` at :503, a leftover
+from the JSON-Lines variant of this same function name) is actually the **bracket-only**
+bitmap (built from `temp_open_close`/`temp2_open_close`, i.e. `{ } [ ]` only) fed to
+`depth_init_MathAPI` and bracket pairing (§3) — it carries no newline information in
+Standard mode. There is no newline bitmap at all on the Standard-mode live path; the
+JSON-Lines kernel of the same name (§5) is a different function, in a different
+translation unit, that really does fold `\n` into its structural bitmap.
 
 ## 2. `structural` array layout
 
