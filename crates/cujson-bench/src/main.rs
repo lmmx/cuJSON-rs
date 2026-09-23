@@ -51,6 +51,9 @@ enum Cmd {
         /// One JSON object per result instead of a table
         #[arg(long)]
         json: bool,
+        /// Give the cujson-* engines their input in pinned memory (copied once, untimed)
+        #[arg(long)]
+        pinned_input: bool,
     },
     /// Parse the same batch repeatedly, printing RSS and free GPU memory per iteration
     Leak {
@@ -116,7 +119,17 @@ fn main() {
             reps,
             warmup,
             json,
-        } => bench(&input, &engines, &levels, tape, reps, warmup, json),
+            pinned_input,
+        } => bench(
+            &input,
+            &engines,
+            &levels,
+            tape,
+            reps,
+            warmup,
+            json,
+            pinned_input,
+        ),
         Cmd::Verify { input, rows } => verify(&input, rows),
         Cmd::Leak {
             input,
@@ -126,6 +139,7 @@ fn main() {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn bench(
     input: &Input,
     engines: &[Engine],
@@ -134,8 +148,19 @@ fn bench(
     reps: usize,
     warmup: usize,
     json: bool,
+    pinned_input: bool,
 ) {
-    let corpus = load(input, None);
+    let mut corpus = load(input, None);
+    if pinned_input {
+        for b in &mut corpus.batches {
+            b.pinned = Some(
+                cujson::PinnedBuffer::from_slice(&b.bytes).unwrap_or_else(|e| {
+                    eprintln!("pinned input: {e}");
+                    std::process::exit(2)
+                }),
+            );
+        }
+    }
     let (rows, bytes) = (corpus.rows(), corpus.bytes());
     let gb = bytes as f64 / 1e9;
     eprintln!(

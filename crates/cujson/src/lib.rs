@@ -45,8 +45,10 @@ pub mod tape;
 mod error;
 #[cfg(feature = "cuda")]
 mod ffi;
+mod pinned;
 
 pub use error::Error;
+pub use pinned::PinnedBuffer;
 pub use tape::Document;
 
 #[cfg(feature = "cuda")]

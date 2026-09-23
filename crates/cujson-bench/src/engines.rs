@@ -134,10 +134,9 @@ fn run_simd(engine: Engine, level: Level, batch: &Batch) -> Run {
 fn run_cujson(engine: Engine, level: Level, tape: Tape, batch: &Batch) -> Result<Run, String> {
     let t = Instant::now();
     let doc = match tape {
-        Tape::Cpu => {
-            cujson::cpu::parse(&batch.bytes, cujson::cpu::Mode::Lines).map_err(|e| e.to_string())?
-        }
-        Tape::Gpu => cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
+        Tape::Cpu => cujson::cpu::parse(batch.input(), cujson::cpu::Mode::Lines)
+            .map_err(|e| e.to_string())?,
+        Tape::Gpu => cujson::parse_lines(batch.input(), cujson::LinesOptions::default())
             .map_err(|e| e.to_string())?,
     };
     let parse = t.elapsed();
@@ -197,9 +196,9 @@ fn run_cujson(engine: Engine, level: Level, tape: Tape, batch: &Batch) -> Result
 fn parse_batch(batch: &Batch, tape: Tape) -> Result<cujson::Document<'_>, String> {
     match tape {
         Tape::Cpu => {
-            cujson::cpu::parse(&batch.bytes, cujson::cpu::Mode::Lines).map_err(|e| e.to_string())
+            cujson::cpu::parse(batch.input(), cujson::cpu::Mode::Lines).map_err(|e| e.to_string())
         }
-        Tape::Gpu => cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
+        Tape::Gpu => cujson::parse_lines(batch.input(), cujson::LinesOptions::default())
             .map_err(|e| e.to_string()),
     }
 }

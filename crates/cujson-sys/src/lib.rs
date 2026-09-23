@@ -61,6 +61,8 @@ unsafe extern "C" {
     ) -> cujson_status;
     pub fn cujson_tape_free(tape: *mut cujson_tape);
     pub fn cujson_pinned_cache_trim();
+    pub fn cujson_host_alloc(bytes: usize) -> *mut core::ffi::c_void;
+    pub fn cujson_host_free(p: *mut core::ffi::c_void);
     pub fn cujson_status_str(s: cujson_status) -> *const c_char;
     pub fn cujson_cuda_runtime_version() -> c_int;
     pub fn cujson_device_count() -> c_int;

@@ -8,3 +8,7 @@
 extern "C" void* cujson_pinned_alloc(size_t bytes);
 extern "C" void cujson_pinned_free(void* p);
 extern "C" void cujson_pinned_cache_trim(void);
+
+// Plain pinned host allocation for caller input (not the tape cache).
+extern "C" void* cujson_host_alloc(size_t bytes);
+extern "C" void cujson_host_free(void* p);

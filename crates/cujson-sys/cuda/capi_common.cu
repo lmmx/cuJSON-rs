@@ -69,6 +69,15 @@ extern "C" void cujson_pinned_cache_trim(void) {
     if (release != nullptr) cudaFreeHost(release);
 }
 
+extern "C" void* cujson_host_alloc(size_t bytes) {
+    void* p = nullptr;
+    return cudaMallocHost(&p, bytes) == cudaSuccess ? p : nullptr;
+}
+
+extern "C" void cujson_host_free(void* p) {
+    if (p != nullptr) cudaFreeHost(p);
+}
+
 extern "C" void cujson_tape_free(cujson_tape* tape) {
     if (tape == nullptr) return;
     if (tape->_alloc != nullptr) {
