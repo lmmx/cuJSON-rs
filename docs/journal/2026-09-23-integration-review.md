@@ -12,6 +12,7 @@
 - pytest results in this container: non-CUDA wheel 6 passed / 5 skipped; CUDA wheel (no driver) 5 passed / 6 skipped, including `test_cuda_build_without_gpu_raises_cuda_error`
 - Lint and tests on the merged tree pass for workspace feature sets {none, cujson/cpu-reference, cujson/cpu-reference+serde, cujson/cuda, cujson-cli/cuda, cujson-cli/cuda+cujson-py/cuda}, plus `cargo clippy -p cujson-py` with and without `cuda` (CUJSON_CUDA_ARCHS=80)
 - `cargo run -p cujson-cli --features cuda -- verify` in this container prints "no NVIDIA driver found" and exits 2
+- `cargo run -p cujson-cli --features cuda -- info` on the user's host (RTX 3090, CUDA runtime and driver 13020) built the CUDA 13 default arch list `75,80,86,89,90,100,120;ptx120` in 1m16s (dev profile) and listed device 0 — first tier-3 observation; no parse kernel has run yet
 
 ## Missing
 
