@@ -13,6 +13,9 @@ classifiers = [
 ]
 dynamic = ["version", "description"]
 
+[dependency-groups]
+dev = ["pytest"]
+
 [tool.maturin]
 manifest-path = "Cargo.toml"
 module-name = "cujson._cujson"

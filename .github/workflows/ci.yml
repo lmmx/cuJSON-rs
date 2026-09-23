@@ -26,11 +26,14 @@ jobs:
       - name: fmt
         run: cargo fmt --all --check
 
+      # cujson-py builds with CUDA by default; this runner has no toolkit.
       - name: clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: |
+          cargo clippy --workspace --exclude cujson-py -- -D warnings
+          cargo clippy -p cujson-py --no-default-features -- -D warnings
 
       - name: test
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude cujson-py
 
       - uses: actions/setup-python@v5
         with:
@@ -41,7 +44,7 @@ jobs:
 
       - name: Build non-CUDA wheel
         if: ${{ hashFiles('crates/cujson-py/Cargo.toml') != '' }}
-        run: maturin build --release -m crates/cujson-py/Cargo.toml --out dist
+        run: maturin build --release --no-default-features -m crates/cujson-py/Cargo.toml --out dist
 
       - name: pytest
         if: ${{ hashFiles('crates/cujson-py/Cargo.toml') != '' }}
