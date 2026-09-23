@@ -54,6 +54,9 @@ enum Cmd {
         /// Give the cujson-* engines their input in pinned memory (copied once, untimed)
         #[arg(long)]
         pinned_input: bool,
+        /// Threads parsing on the GPU at once in cujson-pipe
+        #[arg(long, default_value_t = 1)]
+        gpu_threads: usize,
     },
     /// Parse the same batch repeatedly, printing RSS and free GPU memory per iteration
     Leak {
@@ -120,6 +123,7 @@ fn main() {
             warmup,
             json,
             pinned_input,
+            gpu_threads,
         } => bench(
             &input,
             &engines,
@@ -129,6 +133,7 @@ fn main() {
             warmup,
             json,
             pinned_input,
+            gpu_threads,
         ),
         Cmd::Verify { input, rows } => verify(&input, rows),
         Cmd::Leak {
@@ -149,6 +154,7 @@ fn bench(
     warmup: usize,
     json: bool,
     pinned_input: bool,
+    gpu_threads: usize,
 ) {
     let mut corpus = load(input, None);
     if pinned_input {
@@ -202,7 +208,7 @@ fn bench(
                 let (mut r, mut h) = (0, 0u64);
                 let mut total = Duration::ZERO;
                 let results: Vec<Result<engines::Run, String>> = if engine == Engine::CujsonPipe {
-                    vec![run_pipeline(&corpus.batches, tape)]
+                    vec![run_pipeline(&corpus.batches, tape, gpu_threads)]
                 } else {
                     corpus
                         .batches

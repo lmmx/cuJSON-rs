@@ -200,6 +200,17 @@ pub fn parse_file(path: impl AsRef<Path>) -> Result<Document<'static>, Error> {
     parse_owned(bytes)
 }
 
+/// Let up to `n` parses run on the GPU at once (default 1). Parses from
+/// different threads then overlap: one's input copy with another's kernels
+/// and tape copy back. Each in-flight parse needs its own device memory.
+/// No-op without the `cuda` feature.
+pub fn set_max_concurrent_parses(n: usize) {
+    #[cfg(feature = "cuda")]
+    ffi::set_max_concurrent(n);
+    #[cfg(not(feature = "cuda"))]
+    let _ = n;
+}
+
 /// Release the pinned host buffer kept for the next parse. After a parse,
 /// dropping its `Document` keeps at most one tape buffer (the largest
 /// recent one) pinned so the next parse skips `cudaMallocHost`; call this
