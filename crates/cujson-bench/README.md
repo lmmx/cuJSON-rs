@@ -18,6 +18,12 @@ cargo run --release -p cujson-bench --features cuda -- run --engines cujson-visi
 cargo run --release -p cujson-bench -- run --tape cpu --levels walk
 ```
 
+When `simd-par` and `cujson-pipe` both run at the `walk` level, the last line is the overall figure (the numbers here are an example):
+
+```
+overall (walk, whole file): simd-par 0.101s, cujson-pipe 0.045s: cujson-pipe is 2.24x faster
+```
+
 ## What is measured
 
 Each engine gets identical bytes: the column's rows joined as JSON Lines, in batches of at most
