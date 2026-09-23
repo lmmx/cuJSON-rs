@@ -15,3 +15,4 @@ cujson-sys = { path = "crates/cujson-sys", version = "0.1.0" }
 cujson = { path = "crates/cujson", version = "0.1.0" }
 cudaforge = "=0.1.6"
 serde_json = "1"
+proptest = "1"
