@@ -65,8 +65,12 @@ def test_empty_input_raises_input_error():
 def test_cuda_build_without_gpu_raises_cuda_error():
     """Without a usable driver/device every entry point must raise
     CudaError, never a generic CujsonError."""
-    if GPU_ENABLED:
-        pytest.skip("needs a machine without a usable GPU")
+    try:
+        cujson.cuda_info()
+    except cujson.CudaError:
+        pass
+    else:
+        pytest.skip("a usable GPU is present")
     for call in (
         cujson.cuda_info,
         lambda: cujson.parse(b'{"a": 1}'),
