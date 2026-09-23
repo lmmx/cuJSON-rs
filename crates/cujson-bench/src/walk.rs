@@ -4,8 +4,6 @@
 //! commutatively because `simd_json`'s object iteration order is not the
 //! document order.
 
-use std::borrow::Cow;
-
 use cujson::tape::{Kind, Node, Visitor};
 use simd_json::{BorrowedValue as V, StaticNode as S};
 
@@ -166,10 +164,10 @@ impl Visitor for HashVisitor {
     fn end_array(&mut self) {
         self.end();
     }
-    fn key(&mut self, key: Cow<'_, str>) {
+    fn key(&mut self, key: &str) {
         self.stack.last_mut().expect("key in object").key = hash_bytes(key.as_bytes());
     }
-    fn string(&mut self, value: Cow<'_, str>) {
+    fn string(&mut self, value: &str) {
         self.feed(mix(TAG_STR, hash_bytes(value.as_bytes())));
     }
     fn number(&mut self, raw: &[u8]) {

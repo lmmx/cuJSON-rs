@@ -284,8 +284,17 @@ fn object_pairs<'a>(
 
 fn parse_hex4(bytes: &[u8], start: usize) -> Result<u32, Error> {
     let s = bytes.get(start..start + 4).ok_or(Error::InvalidEscape)?;
-    let s = std::str::from_utf8(s).map_err(|_| Error::InvalidEscape)?;
-    u32::from_str_radix(s, 16).map_err(|_| Error::InvalidEscape)
+    let mut v = 0u32;
+    for &b in s {
+        let d = match b {
+            b'0'..=b'9' => b - b'0',
+            b'a'..=b'f' => b - b'a' + 10,
+            b'A'..=b'F' => b - b'A' + 10,
+            _ => return Err(Error::InvalidEscape),
+        };
+        v = (v << 4) | u32::from(d);
+    }
+    Ok(v)
 }
 
 pub(super) fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
@@ -295,6 +304,12 @@ pub(super) fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
             .map_err(|_| Error::InvalidUtf8);
     }
     let mut out = String::with_capacity(bytes.len());
+    unescape_into(bytes, &mut out)?;
+    Ok(Cow::Owned(out))
+}
+
+/// Append the unescaped text of `bytes` to `out`.
+pub(super) fn unescape_into(bytes: &[u8], out: &mut String) -> Result<(), Error> {
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] != b'\\' {
@@ -362,7 +377,7 @@ pub(super) fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
             _ => return Err(Error::InvalidEscape),
         }
     }
-    Ok(Cow::Owned(out))
+    Ok(())
 }
 
 impl<'d> Node<'d> {

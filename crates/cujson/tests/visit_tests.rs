@@ -22,10 +22,10 @@ impl Visitor for Recorder {
     fn end_array(&mut self) {
         self.0.push("]".into());
     }
-    fn key(&mut self, key: Cow<'_, str>) {
+    fn key(&mut self, key: &str) {
         self.0.push(format!("k:{key}"));
     }
-    fn string(&mut self, value: Cow<'_, str>) {
+    fn string(&mut self, value: &str) {
         self.0.push(format!("s:{value}"));
     }
     fn number(&mut self, raw: &[u8]) {
