@@ -45,6 +45,22 @@ def test_exception_hierarchy():
     assert issubclass(cujson.CudaError, RuntimeError)
     assert issubclass(cujson.CudaNotCompiledError, cujson.CudaError)
     assert issubclass(cujson.NoDeviceError, cujson.CudaError)
+    assert issubclass(cujson.InputError, cujson.CujsonError)
+    assert issubclass(cujson.InputError, ValueError)
+
+
+def test_every_extension_export_is_reexported():
+    from cujson import _cujson
+
+    public = {name for name in dir(_cujson) if not name.startswith("_")}
+    assert public <= set(cujson.__all__)
+    assert all(hasattr(cujson, name) for name in public)
+
+
+def test_empty_input_raises_input_error():
+    # Checked before any CUDA call, so this holds for CUDA and non-CUDA wheels.
+    with pytest.raises(cujson.InputError):
+        cujson.parse(b"")
 
 
 def test_cuda_info_reports_a_dict():
