@@ -167,6 +167,14 @@ fn cuda_info(py: Python<'_>) -> PyResult<Py<PyAny>> {
     }
 }
 
+/// Release the pinned host buffer kept between parses (at most one is kept,
+/// so the next parse can skip allocating). Safe to call at any time, with
+/// or without a GPU.
+#[pyfunction]
+fn trim_pinned_cache() {
+    cujson::trim_pinned_cache();
+}
+
 #[pymodule]
 fn _cujson(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     exceptions::init(py, module)?;
@@ -175,5 +183,6 @@ fn _cujson(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(parse_file, module)?)?;
     module.add_function(wrap_pyfunction!(parse_lines, module)?)?;
     module.add_function(wrap_pyfunction!(cuda_info, module)?)?;
+    module.add_function(wrap_pyfunction!(trim_pinned_cache, module)?)?;
     Ok(())
 }

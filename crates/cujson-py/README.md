@@ -34,6 +34,7 @@ len(lines)                       # 2
 
 cujson.parse_file("data.json")   # read and parse a file
 cujson.cuda_info()               # runtime, driver, compiled architectures, devices
+cujson.trim_pinned_cache()       # release the pinned buffer kept between parses
 ```
 
 `parse` and `parse_lines` accept `str`, `bytes`, `bytearray` or `memoryview`. The GIL is
@@ -57,6 +58,9 @@ All exceptions derive from `cujson.CujsonError`:
   such as `1.2.3` are not rejected.
 - Inputs are limited to just under 2 GiB (cuJSON uses 32-bit sizes).
 - Parses are serialised within a process: cuJSON uses the default CUDA stream.
+- After a parse, dropping its `Document` keeps at most one tape-sized pinned host buffer (roughly
+  a third of the input size) allocated so the next parse can reuse it. It is released by
+  `cujson.trim_pinned_cache()` or when the process exits.
 
 ## Credits
 

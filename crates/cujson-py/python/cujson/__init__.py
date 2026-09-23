@@ -15,6 +15,7 @@ from ._cujson import (
     parse,
     parse_file,
     parse_lines,
+    trim_pinned_cache,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "parse",
     "parse_file",
     "parse_lines",
+    "trim_pinned_cache",
 ]

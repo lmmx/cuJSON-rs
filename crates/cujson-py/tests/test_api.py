@@ -80,6 +80,27 @@ def test_cuda_build_without_gpu_raises_cuda_error():
             call()
 
 
+def test_trim_pinned_cache_is_safe_without_a_parse():
+    # Holds with or without a GPU: nothing is cached, so no CUDA call is made.
+    cujson.trim_pinned_cache()
+    cujson.trim_pinned_cache()
+
+
+@skip_no_gpu
+def test_gpu_parses_stay_correct_across_pinned_cache_reuse_and_trim():
+    text = SMALL_RECORDS.read_text()
+    lines = [json.loads(line) for line in text.splitlines() if line.strip()]
+    large = json.loads(LARGE_RECORD.read_text())
+    for round_ in range(4):
+        a = cujson.parse_lines(text.encode("utf-8"))
+        b = cujson.parse(LARGE_RECORD.read_bytes())
+        assert a.lines() == lines
+        assert b.to_python() == large
+        del a, b
+        if round_ == 1:
+            cujson.trim_pinned_cache()
+
+
 @skip_no_gpu
 def test_gpu_parse_matches_json_loads_small_records():
     text = SMALL_RECORDS.read_text()
