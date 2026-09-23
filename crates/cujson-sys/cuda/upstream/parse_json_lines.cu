@@ -303,7 +303,6 @@ inline bool stage1_UTF8Validator(uint32_t * block_GPU, uint64_t size){
     cudaMemcpyAsync(&error, error_GPU, sizeof(uint32_t), cudaMemcpyDeviceToHost, 0);
     cudaFreeAsync(general_ptr, 0);
     if(error != 0){ 
-        printf("Incomplete ASCII!\n"); 
         //cudaFreeAsync(error_GPU, 0);
         //cudaFreeAsync(hastUTF8_GPU, 0);
         return false;
@@ -1115,22 +1114,18 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
 
     // Check top-level input before any pointer arithmetic or dereference.
     if (input.size == 0) {
-        std::cerr << "\033[1;31m Error: input.size cannot be zero. \033[0m\n";
         return cuJSONResult{};
     }
 
     if (input.data == nullptr) {
-        std::cerr << "\033[1;31m Error: input.data is NULL with non-zero input.size. \033[0m\n";
         return cuJSONResult{};
     }
 
     if (input.chunkCount == 0) {
-        std::cerr << "\033[1;31m Error: input.chunkCount cannot be zero. \033[0m\n";
         return cuJSONResult{};
     }
 
     if (input.chunks.size() < input.chunkCount || input.chunksSize.size() < input.chunkCount) {
-        std::cerr << "\033[1;31m Error: input chunk metadata is smaller than input.chunkCount. \033[0m\n";
         return cuJSONResult{};
     }
 
@@ -1149,17 +1144,14 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
         uint8_t* currentChunk = input.chunks[i];
 
         if (currentChunkSize == 0) {
-            std::cerr << "\033[1;31m Error: Invalid chunk size at index " << i << ". Chunk size cannot be zero. \033[0m\n";
             return cuJSONResult{};
         }
 
         if (currentChunkSize > input.size) {
-            std::cerr << "\033[1;31m Error: Chunk size at index " << i << " exceeds total input size. \033[0m\n";
             return cuJSONResult{};
         }
 
         if (currentChunk == nullptr) {
-            std::cerr << "\033[1;31m Error: input.chunks[" << i << "] is NULL with non-zero chunk size. \033[0m\n";
             return cuJSONResult{};
         }
 

@@ -315,7 +315,6 @@ inline bool UTF8Validation(uint32_t * block_GPU, uint64_t size){
     cudaMemcpyAsync(&error, error_GPU, sizeof(uint32_t), cudaMemcpyDeviceToHost, 0);
     cudaFreeAsync(general_ptr, 0);
     if(error != 0){ 
-        printf("Incomplete ASCII!\n"); 
         //cudaFreeAsync(error_GPU, 0);
         //cudaFreeAsync(hastUTF8_GPU, 0);
         return false;
@@ -1603,7 +1602,6 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
 
     // Check if the input is valid
     if (input.data == nullptr || input.size == 0) {
-        std::cerr << "\033[1;31m Error: Invalid JSON content or input.size. \033[0m\n";
         return cuJSONResult{};  // Return empty result
     }
 
