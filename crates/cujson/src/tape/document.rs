@@ -212,25 +212,7 @@ impl<'a> Document<'a> {
 
     /// Resolve an RFC 6901 JSON Pointer against the root value.
     pub fn pointer(&'a self, pointer: &str) -> Option<Node<'a>> {
-        let mut node = self.root();
-        if pointer.is_empty() {
-            return Some(node);
-        }
-        if !pointer.starts_with('/') {
-            return None;
-        }
-        for raw_tok in pointer[1..].split('/') {
-            let tok = raw_tok.replace("~1", "/").replace("~0", "~");
-            node = match node.kind() {
-                Kind::Object => node.get(&tok)?,
-                Kind::Array => {
-                    let idx: usize = tok.parse().ok()?;
-                    node.index(idx)?
-                }
-                _ => return None,
-            };
-        }
-        Some(node)
+        self.root().pointer(pointer)
     }
 }
 
@@ -384,6 +366,30 @@ fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
 }
 
 impl<'d> Node<'d> {
+    /// Resolve an RFC 6901 JSON Pointer relative to this node (`""` is the
+    /// node itself).
+    pub fn pointer(&self, pointer: &str) -> Option<Node<'d>> {
+        let mut node = *self;
+        if pointer.is_empty() {
+            return Some(node);
+        }
+        if !pointer.starts_with('/') {
+            return None;
+        }
+        for raw_tok in pointer[1..].split('/') {
+            let tok = raw_tok.replace("~1", "/").replace("~0", "~");
+            node = match node.kind() {
+                Kind::Object => node.get(&tok)?,
+                Kind::Array => {
+                    let idx: usize = tok.parse().ok()?;
+                    node.index(idx)?
+                }
+                _ => return None,
+            };
+        }
+        Some(node)
+    }
+
     pub fn kind(&self) -> Kind {
         match self.repr {
             NodeRepr::Container { kind, .. } => kind,

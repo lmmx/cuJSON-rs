@@ -116,3 +116,15 @@ def test_gpu_parse_rejects_json_lines():
         {"hello": "world"},
         {"bonjour": "monde"},
     ]
+
+
+@skip_no_gpu
+def test_gpu_json_lines_document_is_its_lines():
+    doc = cujson.parse_lines('{"hello": "world"}\n{"bonjour": "monde"}\n')
+    lines = [{"hello": "world"}, {"bonjour": "monde"}]
+    assert doc.to_python() == lines
+    assert doc.pointer("") == lines
+    assert doc.pointer("/1") == {"bonjour": "monde"}
+    assert doc.pointer("/1/bonjour") == "monde"
+    with pytest.raises(KeyError):
+        doc.pointer("/2")

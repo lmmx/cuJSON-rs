@@ -38,28 +38,55 @@ fn extract_bytes(ob: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
 
 /// A parsed document: owns its input bytes and GPU-produced tape.
 #[pyclass(frozen)]
-struct Document(cujson::Document<'static>);
+struct Document {
+    doc: cujson::Document<'static>,
+    /// Built by `parse_lines`: the document is the sequence of its lines.
+    is_lines: bool,
+}
 
 #[pymethods]
 impl Document {
     /// Full conversion to Python `dict`/`list`/`str`/`int`/`float`/`bool`/`None`.
+    /// A JSON Lines document converts to the list of its lines.
     fn to_python(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        convert::node_to_object(py, &self.0.root())
+        if self.is_lines {
+            return Ok(self.lines(py)?.into_any());
+        }
+        convert::node_to_object(py, &self.doc.root())
     }
 
-    /// Resolve an RFC 6901 JSON Pointer, e.g. `"/0/user/lang"`.
+    /// Resolve an RFC 6901 JSON Pointer, e.g. `"/0/user/lang"`. For a JSON
+    /// Lines document the first token selects the line, so `"/1/user"` is
+    /// line 1's `user` and `""` is every line.
     fn pointer(&self, py: Python<'_>, pointer: &str) -> PyResult<Py<PyAny>> {
-        match self.0.pointer(pointer) {
-            Some(node) => convert::node_to_object(py, &node),
-            None => Err(PyKeyError::new_err(pointer.to_string())),
+        let not_found = || PyKeyError::new_err(pointer.to_string());
+        if !self.is_lines {
+            let node = self.doc.pointer(pointer).ok_or_else(not_found)?;
+            return convert::node_to_object(py, &node);
         }
+        if pointer.is_empty() {
+            return self.to_python(py);
+        }
+        let rest = pointer.strip_prefix('/').ok_or_else(not_found)?;
+        let (line, rest) = match rest.find('/') {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, ""),
+        };
+        let index: usize = line.parse().map_err(|_| not_found())?;
+        let node = self
+            .doc
+            .lines()
+            .nth(index)
+            .and_then(|line| line.pointer(rest))
+            .ok_or_else(not_found)?;
+        convert::node_to_object(py, &node)
     }
 
     /// Every top-level value, for a JSON Lines document (a single-element
     /// list for a standard document).
     fn lines(&self, py: Python<'_>) -> PyResult<Py<PyList>> {
         let items: PyResult<Vec<Py<PyAny>>> = self
-            .0
+            .doc
             .lines()
             .map(|node| convert::node_to_object(py, &node))
             .collect();
@@ -67,7 +94,7 @@ impl Document {
     }
 
     fn __len__(&self) -> usize {
-        self.0.lines().count()
+        self.doc.lines().count()
     }
 
     fn __iter__(slf: PyRef<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -80,7 +107,10 @@ impl Document {
 fn parse(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Document> {
     let bytes = extract_bytes(data)?;
     py.detach(|| cujson::parse_owned(bytes))
-        .map(Document)
+        .map(|doc| Document {
+            doc,
+            is_lines: false,
+        })
         .map_err(|e| exceptions::to_pyerr(py, e))
 }
 
@@ -88,7 +118,10 @@ fn parse(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Document> {
 fn parse_file(py: Python<'_>, path: &str) -> PyResult<Document> {
     let path = path.to_string();
     py.detach(|| cujson::parse_file(path))
-        .map(Document)
+        .map(|doc| Document {
+            doc,
+            is_lines: false,
+        })
         .map_err(|e| exceptions::to_pyerr(py, e))
 }
 
@@ -104,7 +137,10 @@ fn parse_lines(
         chunk_bytes: chunk_bytes.unwrap_or_else(|| cujson::LinesOptions::default().chunk_bytes),
     };
     py.detach(|| cujson::parse_lines_owned(bytes, opts))
-        .map(Document)
+        .map(|doc| Document {
+            doc,
+            is_lines: true,
+        })
         .map_err(|e| exceptions::to_pyerr(py, e))
 }
 
