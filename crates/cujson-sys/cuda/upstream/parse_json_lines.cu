@@ -1244,6 +1244,21 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
     
 
 
+        if (input.chunkCount == 1) {
+            // Single chunk: copy straight into mergeChunks' final layout
+            // (structural at +1, pair_pos at +result_size+2) and skip the
+            // second pinned allocation and the host-to-host merge.
+            res_buf_arrays[i] = nullptr;
+            cudaMallocHost(&resultBuffer, sizeof(int32_t) * ((size_t)result_size * ROW2 + 3));
+            cudaMemcpy(resultBuffer + 1,
+                    result_GPU,
+                    sizeof(int32_t) * result_size,
+                    cudaMemcpyDeviceToHost);
+            cudaMemcpy(resultBuffer + 1 + result_size + 1,
+                    result_GPU + result_size,
+                    sizeof(int32_t) * result_size,
+                    cudaMemcpyDeviceToHost);
+        } else {
         cudaMallocHost(&res_buf_arrays[i], sizeof(int32_t) * result_size * ROW2);
         // 'structural' array of current chunk
         cudaMemcpy(res_buf_arrays[i], 
@@ -1256,9 +1271,8 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
                 result_GPU + result_size, 
                 sizeof(int32_t) * result_size, 
                 cudaMemcpyDeviceToHost);
-    
+        }
 
-        
         total_result_size += result_size;
         parsed_tree.resultSizesPrefix.push_back(total_result_size);
         parsed_tree.resultSizes.push_back(result_size);
@@ -1291,10 +1305,12 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
 
 
     
-    resultBuffer = mergeChunks(res_buf_arrays, &parsed_tree, parsed_tree.chunkCount);
-    // mergeChunks copied every chunk's pinned result into resultBuffer.
-    for (int i = 0; i < parsed_tree.chunkCount; i++) {
-        cudaFreeHost(res_buf_arrays[i]);
+    if (input.chunkCount > 1) {
+        resultBuffer = mergeChunks(res_buf_arrays, &parsed_tree, parsed_tree.chunkCount);
+        // mergeChunks copied every chunk's pinned result into resultBuffer.
+        for (int i = 0; i < parsed_tree.chunkCount; i++) {
+            cudaFreeHost(res_buf_arrays[i]);
+        }
     }
 
 
