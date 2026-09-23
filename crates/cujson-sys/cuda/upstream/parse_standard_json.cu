@@ -1696,7 +1696,6 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
 
     // cout << "Total Result Size = " << parsed_tree.totalResultSize << endl;
     // cout << "File Size = " << parsed_tree.fileSize << endl;
-    cudaFree(input.data);
     return parsed_tree;
 }
 

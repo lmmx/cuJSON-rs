@@ -1279,7 +1279,6 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
 
     // cout << "Total Result Size = " << parsed_tree.totalResultSize << endl;
     // cout << "File Size = " << parsed_tree.fileSize << endl;
-    cudaFreeHost(input.data); 
 
     return parsed_tree;
 }
