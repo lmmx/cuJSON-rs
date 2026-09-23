@@ -61,3 +61,28 @@ extern "C" cujson_status cujson_device_name(int device, char* buf, size_t buf_le
 extern "C" const char* cujson_compiled_archs(void) {
     return CUJSON_COMPILED_ARCHS;
 }
+
+extern "C" const char* cujson_cuda_error_string(int err) {
+    // Fixed-size static buffer: called from behind ffi.rs's process-wide
+    // GPU_LOCK, so there is no concurrent writer to race with.
+    static char buf[256];
+    cudaError_t e = static_cast<cudaError_t>(err);
+    std::snprintf(buf, sizeof(buf), "%s: %s", cudaGetErrorName(e), cudaGetErrorString(e));
+    return buf;
+}
+
+extern "C" int cujson_cuda_driver_version(void) {
+    int version = 0;
+    cudaError_t err = cudaDriverGetVersion(&version);
+    if (err != cudaSuccess) return 0;
+    return version;
+}
+
+extern "C" cujson_status cujson_mem_get_info(size_t* free_bytes, size_t* total_bytes) {
+    if (free_bytes == nullptr || total_bytes == nullptr) return CUJSON_ERR_INTERNAL;
+    cudaError_t err = cudaDeviceSynchronize();
+    if (err != cudaSuccess) return CUJSON_ERR_CUDA;
+    err = cudaMemGetInfo(free_bytes, total_bytes);
+    if (err != cudaSuccess) return CUJSON_ERR_CUDA;
+    return CUJSON_OK;
+}

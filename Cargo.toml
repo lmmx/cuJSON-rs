@@ -17,3 +17,6 @@ cudaforge = "=0.1.6"
 serde_json = "1"
 proptest = "1"
 pyo3 = "0.29"
+clap = { version = "4", features = ["derive"] }
+assert_cmd = "2"
+predicates = "3"

@@ -61,6 +61,20 @@ cujson_status cujson_device_name(int device, char* buf, size_t buf_len);
 /* e.g. "75,80,86,89,90;ptx90" - set by build.rs via -DCUJSON_COMPILED_ARCHS. */
 const char* cujson_compiled_archs(void);
 
+/* "<cudaGetErrorName>: <cudaGetErrorString>" for a raw cudaError_t, e.g.
+ * "cudaErrorInsufficientDriver: CUDA driver version is insufficient for
+ * CUDA runtime version". Returned pointer is to a static buffer, valid
+ * until the next call on this thread; callers must copy it out before
+ * calling again. */
+const char* cujson_cuda_error_string(int err);
+
+/* Driver's supported CUDA version (e.g. 12020 for 12.2), or 0 if no
+ * driver responds (cudaDriverGetVersion failed). */
+int cujson_cuda_driver_version(void);
+
+/* cudaDeviceSynchronize then cudaMemGetInfo, both in bytes. */
+cujson_status cujson_mem_get_info(size_t* free_bytes, size_t* total_bytes);
+
 #ifdef __cplusplus
 }
 #endif

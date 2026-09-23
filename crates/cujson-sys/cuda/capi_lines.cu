@@ -8,6 +8,7 @@
 #include "upstream/cujson_error.h"
 
 #include <cuda_runtime.h>
+#include <thrust/system_error.h>
 #include <cstdint>
 #include <climits>
 #include <vector>
@@ -87,7 +88,16 @@ extern "C" cujson_status cujson_parse_lines(const uint8_t* data, size_t size, si
             default:
                 return CUJSON_ERR_INTERNAL;
         }
+    } catch (const thrust::system_error& e) {
+        // See capi_standard.cu's identical catch clause.
+        out->cuda_error = static_cast<int32_t>(e.code().value());
+        return CUJSON_ERR_CUDA;
     } catch (...) {
+        cudaError_t cerr = cudaGetLastError();
+        if (cerr != cudaSuccess) {
+            out->cuda_error = static_cast<int32_t>(cerr);
+            return CUJSON_ERR_CUDA;
+        }
         return CUJSON_ERR_INTERNAL;
     }
 
