@@ -185,6 +185,7 @@ fn bench(
     );
     let baseline_kb = proc_kb("VmRSS:").unwrap_or(0);
     let mut reference: Vec<(Level, u64, u64)> = vec![];
+    let mut medians: Vec<(Engine, Level, f64)> = vec![];
     if levels.contains(&Level::Walk) {
         // Every walk result is checked against simd-json's, even when it is the only engine run.
         let (mut r, mut h) = (0, 0u64);
@@ -269,6 +270,7 @@ fn bench(
             }
             let mut t = totals.clone();
             let med = median(&mut t);
+            medians.push((engine, level, med));
             let phase_med: Vec<f64> = (0..names.len())
                 .map(|i| median(&mut runs.iter().map(|r| r[i]).collect::<Vec<_>>()))
                 .collect();
@@ -307,6 +309,37 @@ fn bench(
                     ph.join(", ")
                 );
             }
+        }
+    }
+    let find = |e: Engine, l: Level| medians.iter().find(|m| m.0 == e && m.1 == l).map(|m| m.2);
+    if let (Some(simd), Some(pipe)) = (
+        find(Engine::SimdPar, Level::Walk),
+        find(Engine::CujsonPipe, Level::Walk),
+    ) {
+        let ratio = simd / pipe;
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "summary": "simd-par vs cujson-pipe, whole file, walk level",
+                    "simd_par_s": simd, "cujson_pipe_s": pipe, "speedup": ratio,
+                    "tape": format!("{tape:?}"),
+                })
+            );
+        } else {
+            let verdict = if ratio >= 1.0 {
+                format!("cujson-pipe is {ratio:.2}x faster")
+            } else {
+                format!("cujson-pipe is {:.2}x slower", 1.0 / ratio)
+            };
+            let note = if tape == Tape::Cpu {
+                " (--tape cpu: the cuJSON tape is built on the CPU, not a GPU result)"
+            } else {
+                ""
+            };
+            println!(
+                "overall (walk, whole file): simd-par {simd:.3}s, cujson-pipe {pipe:.3}s: {verdict}{note}"
+            );
         }
     }
 }
