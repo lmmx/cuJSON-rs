@@ -80,7 +80,10 @@ fn lines_blank_line_between_records() {
     let bytes = b"{\"a\":1}\n\n{\"a\":2}\n";
     let doc = doc_from(bytes, Mode::Lines);
     let got: Vec<serde_json::Value> = doc.lines().map(|n| n.to_value()).collect();
-    assert_eq!(got, vec![serde_json::json!({"a": 1}), serde_json::json!({"a": 2})]);
+    assert_eq!(
+        got,
+        vec![serde_json::json!({"a": 1}), serde_json::json!({"a": 2})]
+    );
 }
 
 /// (c) CRLF line endings: `\r` matches none of `bitMapCreatorSimd`'s
@@ -92,7 +95,10 @@ fn lines_crlf_endings() {
     let bytes = b"{\"a\":1}\r\n{\"a\":2}\r\n";
     let doc = doc_from(bytes, Mode::Lines);
     let got: Vec<serde_json::Value> = doc.lines().map(|n| n.to_value()).collect();
-    assert_eq!(got, vec![serde_json::json!({"a": 1}), serde_json::json!({"a": 2})]);
+    assert_eq!(
+        got,
+        vec![serde_json::json!({"a": 1}), serde_json::json!({"a": 2})]
+    );
 }
 
 /// (d) Chunk boundaries are a GPU-side multi-chunk implementation detail
