@@ -12,7 +12,7 @@ fn main() {
 mod build {
     use cudaforge::{CudaToolkit, KernelBuilder};
     use std::env;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     /// One SASS target, or a PTX-only fallback target (embedded IR, no
     /// machine code, JIT-compiled by the driver on unlisted GPUs).
@@ -90,7 +90,11 @@ mod build {
                 "cuda/capi_lines.cu",
                 "cuda/capi_common.cu",
             ])
-            .watch(["cuda"])
+            // Every file, not the directory: cudaforge hashes only .h/.cuh/.hpp
+            // under a watched directory, but the unity TUs also #include
+            // upstream .cu and .cpp files, whose edits would otherwise leave
+            // stale objects in place.
+            .watch(files_under(Path::new("cuda")))
             // Forced low base purely so cudaforge's own per-file default
             // -gencode (added automatically, one per file, see builder.rs)
             // is always valid and never runs nvidia-smi (no GPU in this
@@ -129,6 +133,24 @@ mod build {
     /// of plain numbers (SASS) and/or "ptxNN" entries (PTX-only), e.g.
     /// "89" or "80,90,ptx90". Otherwise picks CUDA12_DEFAULT/CUDA13_DEFAULT
     /// from the detected toolkit's major version.
+    /// All files below `dir`, recursively, in a stable order.
+    fn files_under(dir: &Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("reading {}: {e}", dir.display()))
+            .map(|e| e.expect("reading directory entry").path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                files.extend(files_under(&path));
+            } else {
+                files.push(path);
+            }
+        }
+        files
+    }
+
     fn resolve_archs(toolkit: &CudaToolkit) -> Vec<ArchEntry> {
         // An empty value (e.g. `CUJSON_CUDA_ARCHS: ""` in a CI matrix) means unset.
         if let Some(raw) = env::var("CUJSON_CUDA_ARCHS")
