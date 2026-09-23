@@ -13,12 +13,7 @@ name = "cujson"
 crate-type = ["cdylib"]
 doc = false
 
-[features]
-# GPU build by default, so `pip install -e .` works; CI builds its no-CUDA wheel
-# with --no-default-features.
-default = ["cuda"]
-cuda = ["cujson/cuda"]
-
 [dependencies]
-cujson = { workspace = true, features = ["serde"] }
+# Always CUDA: a cuJSON wheel without a GPU parser has nothing to offer.
+cujson = { workspace = true, features = ["cuda", "serde"] }
 pyo3 = { workspace = true, features = ["abi3-py310", "extension-module"] }

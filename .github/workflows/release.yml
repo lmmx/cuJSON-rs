@@ -110,14 +110,16 @@ jobs:
       - name: Install maturin
         run: pip3.12 install maturin
 
-      - name: Rewrite package name for cuda${{ matrix.cuda_major }}
+      # `cujson` is the CUDA 13 wheel; CUDA 12 ships as `cujson-cu12`.
+      - name: Rename the CUDA 12 package
+        if: matrix.cuda_major == 12
         run: |
-          sed -i 's/^name = "cujson"/name = "cujson-cu${{ matrix.cuda_major }}"/' crates/cujson-py/pyproject.toml
+          sed -i 's/^name = "cujson"/name = "cujson-cu12"/' crates/cujson-py/pyproject.toml
 
       - name: Build wheel
         run: |
           source "$HOME/.cargo/env"
-          maturin build --release --features cuda -m crates/cujson-py/Cargo.toml --out dist
+          maturin build --release -m crates/cujson-py/Cargo.toml --out dist
 
       - name: Install auditwheel
         run: pip3.12 install auditwheel

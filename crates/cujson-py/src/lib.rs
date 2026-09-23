@@ -108,19 +108,13 @@ fn parse_lines(
         .map_err(|e| exceptions::to_pyerr(py, e))
 }
 
-/// CUDA runtime/device info. Built without the `cuda` feature, this
-/// returns `{"compiled": False}` rather than raising — `cuda_info()`'s own
-/// job is to report on availability, not require it. With `cuda` compiled
-/// in but no driver (or no device) present, it raises `CudaError`/
-/// `NoDeviceError` — a clean exception, not a crash, which is the
-/// behaviour a driverless container exercises for real (this crate's
-/// journal entry marks that unverified-on-a-real-GPU, tier 3).
+/// CUDA runtime/device info. Raises `CudaError`/`NoDeviceError` when no
+/// usable driver or device is present.
 #[pyfunction]
 fn cuda_info(py: Python<'_>) -> PyResult<Py<PyAny>> {
     match cujson::cuda_info() {
         Ok(info) => {
             let dict = PyDict::new(py);
-            dict.set_item("compiled", true)?;
             dict.set_item("runtime_version", info.runtime_version)?;
             dict.set_item("compiled_archs", info.compiled_archs)?;
             let devices = PyList::empty(py);
@@ -131,11 +125,6 @@ fn cuda_info(py: Python<'_>) -> PyResult<Py<PyAny>> {
                 devices.append(dev)?;
             }
             dict.set_item("devices", devices)?;
-            Ok(dict.into_any().unbind())
-        }
-        Err(cujson::Error::CudaNotCompiled) => {
-            let dict = PyDict::new(py);
-            dict.set_item("compiled", false)?;
             Ok(dict.into_any().unbind())
         }
         Err(e) => Err(exceptions::to_pyerr(py, e)),
@@ -150,7 +139,5 @@ fn _cujson(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(parse_file, module)?)?;
     module.add_function(wrap_pyfunction!(parse_lines, module)?)?;
     module.add_function(wrap_pyfunction!(cuda_info, module)?)?;
-    // How the wheel was built, answerable without touching the driver.
-    module.add("CUDA_COMPILED", cfg!(feature = "cuda"))?;
     Ok(())
 }

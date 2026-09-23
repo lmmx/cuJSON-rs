@@ -5,13 +5,13 @@ Rust implementation of cuJSON: A Highly Parallel JSON Parser for GPUs (ASPLOS â€
 
 `.github/workflows/ci.yml` runs on every push and PR:
 
-- `check`: `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`
-  (no CUDA), and a non-CUDA `maturin` wheel build plus `pytest` against `crates/cujson-py`.
+- `check`: `cargo fmt --check`, `cargo clippy` and `cargo test` over the workspace except
+  `cujson-py`, which always builds with CUDA (no CUDA toolkit on this runner).
 - `cuda-compile`: a `{cuda: ["12.8.1", "13.0.0"]}` matrix in `nvidia/cuda:*-devel-ubuntu22.04`
   containers. Runs `cargo clippy`/`build`/`test --features cuda` (GPU-only tests are
   `#[ignore]`d, so this proves link and startup without a GPU), then asserts with `ldd` that
   the built `cujson` CLI binary has no dynamic `libcudart` dependency (cudart is linked
-  statically). One matrix leg pins `CUJSON_CUDA_ARCHS=80` for speed; the other builds the full
+  statically), then builds the Python wheel and runs `pytest` against it. One matrix leg pins `CUJSON_CUDA_ARCHS=80` for speed; the other builds the full
   default arch list.
 
 `.github/workflows/release.yml` runs on `v*.*.*` tags and on manual `workflow_dispatch` (with a
@@ -21,7 +21,8 @@ Rust implementation of cuJSON: A Highly Parallel JSON Parser for GPUs (ASPLOS â€
   `cujson-cu{12,13}-x86_64-unknown-linux-gnu.tar.gz`, asserting no dynamic `libcudart` via `ldd`.
 - `wheel`: builds the Python wheel per CUDA major inside a `manylinux_2_28` container with the
   CUDA toolkit installed from NVIDIA's RHEL8 package repo (the `nvidia/cuda` Ubuntu images only
-  yield `manylinux_2_35` wheels), renaming the distribution to `cujson-cu12`/`cujson-cu13` and
+  yield `manylinux_2_35` wheels), publishing the CUDA 13 build as `cujson` and the CUDA 12 build as
+  `cujson-cu12`, and
   checking with `auditwheel show` that no CUDA shared library other than `libcuda` (which is
   dlopen'd by the driver at runtime, never bundled) appears in the wheel.
 - `crate-package-check`: lists and size-checks the `cujson-sys` `.crate` (crates.io's 10 MB
@@ -31,7 +32,7 @@ Rust implementation of cuJSON: A Highly Parallel JSON Parser for GPUs (ASPLOS â€
   `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run` â€”
   a manual dispatch never publishes.
 
-Release artifacts: `cujson-cu12`/`cujson-cu13` Python wheels, `cujson-cu{12,13}-*.tar.gz` CLI
+Release artifacts: `cujson` (CUDA 13) and `cujson-cu12` (CUDA 12) Python wheels, `cujson-cu{12,13}-*.tar.gz` CLI
 tarballs, and the `cujson-sys`/`cujson` crates on crates.io. No source distribution is published
-for the `-cuXX` Python packages (a source build needs `nvcc`); such users should depend on the
+for the Python packages (a source build needs `nvcc`); such users should depend on the
 Rust crate directly.

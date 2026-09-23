@@ -26,31 +26,13 @@ jobs:
       - name: fmt
         run: cargo fmt --all --check
 
-      # cujson-py builds with CUDA by default; this runner has no toolkit.
+      # cujson-py always builds with CUDA; this runner has no toolkit, so it
+      # is covered by cuda-compile instead.
       - name: clippy
-        run: |
-          cargo clippy --workspace --exclude cujson-py -- -D warnings
-          cargo clippy -p cujson-py --no-default-features -- -D warnings
+        run: cargo clippy --workspace --exclude cujson-py -- -D warnings
 
       - name: test
         run: cargo test --workspace --exclude cujson-py
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install maturin
-        run: pip install maturin
-
-      - name: Build non-CUDA wheel
-        if: ${{ hashFiles('crates/cujson-py/Cargo.toml') != '' }}
-        run: maturin build --release --no-default-features -m crates/cujson-py/Cargo.toml --out dist
-
-      - name: pytest
-        if: ${{ hashFiles('crates/cujson-py/Cargo.toml') != '' }}
-        run: |
-          pip install dist/*.whl pytest
-          pytest crates/cujson-py/tests
 
   cuda-compile:
     name: CUDA compile (${{ matrix.cuda }})
@@ -111,3 +93,12 @@ jobs:
             exit 1
           fi
           ldd "$bin"
+
+      - uses: astral-sh/setup-uv@v6
+
+      # No GPU here: pytest's no-driver test expects CudaError from every entry point.
+      - name: Python wheel + pytest
+        run: |
+          uv venv
+          uv pip install ./crates/cujson-py pytest
+          uv run --no-project pytest crates/cujson-py/tests

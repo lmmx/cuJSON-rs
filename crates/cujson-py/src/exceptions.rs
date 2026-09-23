@@ -11,7 +11,6 @@ static INVALID_UTF8_ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 static UNBALANCED_ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 static INPUT_ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 static CUDA_ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
-static CUDA_NOT_COMPILED_ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 static NO_DEVICE_ERROR: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 
 fn make_type<'py>(
@@ -70,16 +69,6 @@ pub fn init(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("CudaError", &cuda_error)?;
     CUDA_ERROR.set(py, cuda_error.clone().unbind()).ok();
 
-    let cuda_not_compiled = make_type(
-        py,
-        "CudaNotCompiledError",
-        &PyTuple::new(py, [cuda_error.clone()])?,
-    )?;
-    module.add("CudaNotCompiledError", &cuda_not_compiled)?;
-    CUDA_NOT_COMPILED_ERROR
-        .set(py, cuda_not_compiled.unbind())
-        .ok();
-
     let no_device = make_type(py, "NoDeviceError", &PyTuple::new(py, [cuda_error])?)?;
     module.add("NoDeviceError", &no_device)?;
     NO_DEVICE_ERROR.set(py, no_device.unbind()).ok();
@@ -101,14 +90,6 @@ fn err_from(py: Python<'_>, cell: &PyOnceLock<Py<PyType>>, message: String) -> P
 pub fn to_pyerr(py: Python<'_>, err: cujson::Error) -> PyErr {
     use cujson::Error as E;
     match err {
-        E::CudaNotCompiled => err_from(
-            py,
-            &CUDA_NOT_COMPILED_ERROR,
-            "cujson was built without the `cuda` feature; install a GPU wheel \
-             (`pip install cujson-cu12` or `pip install cujson-cu13`, matching \
-             your CUDA major version) to parse on a GPU"
-                .to_string(),
-        ),
         E::NoDevice => err_from(
             py,
             &NO_DEVICE_ERROR,
