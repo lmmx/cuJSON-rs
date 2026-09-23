@@ -23,7 +23,6 @@ pub enum Mode {
 struct RawStructure {
     offsets: Vec<i32>,
     pairs: Vec<(usize, usize)>,
-    depth: i32,
 }
 
 /// Scan `bytes` for structural characters (`tape/FORMAT.md` §1), returning
@@ -40,8 +39,6 @@ fn scan_structural(bytes: &[u8], base: usize, mark_newline: bool) -> Result<RawS
     let mut offsets = Vec::new();
     let mut pairs = Vec::new();
     let mut stack: Vec<(u8, usize)> = Vec::new();
-    let mut depth = 0i32;
-    let mut max_depth = 0i32;
     let mut in_string = false;
     let mut escape = false;
 
@@ -61,8 +58,6 @@ fn scan_structural(bytes: &[u8], base: usize, mark_newline: bool) -> Result<RawS
             b'{' | b'[' => {
                 offsets.push((base + i + 1) as i32);
                 stack.push((b, offsets.len() - 1));
-                depth += 1;
-                max_depth = max_depth.max(depth);
             }
             b'}' | b']' => {
                 offsets.push((base + i + 1) as i32);
@@ -72,7 +67,6 @@ fn scan_structural(bytes: &[u8], base: usize, mark_newline: bool) -> Result<RawS
                     return Err(Error::UnbalancedBrackets);
                 }
                 pairs.push((open_idx, offsets.len() - 1));
-                depth -= 1;
             }
             b':' | b',' => {
                 offsets.push((base + i + 1) as i32);
@@ -89,11 +83,7 @@ fn scan_structural(bytes: &[u8], base: usize, mark_newline: bool) -> Result<RawS
     if !stack.is_empty() {
         return Err(Error::UnbalancedBrackets);
     }
-    Ok(RawStructure {
-        offsets,
-        pairs,
-        depth: max_depth,
-    })
+    Ok(RawStructure { offsets, pairs })
 }
 
 /// JSON Lines: the kernel does not split the input by line at all — every
@@ -123,11 +113,7 @@ pub fn build_tape_cpu(input: &[u8], mode: Mode) -> Result<Tape, Error> {
     }
     std::str::from_utf8(input).map_err(|_| Error::InvalidUtf8)?;
 
-    let RawStructure {
-        offsets,
-        pairs,
-        depth,
-    } = match mode {
+    let RawStructure { offsets, pairs } = match mode {
         Mode::Standard => scan_structural(input, 0, false)?,
         Mode::Lines => build_lines(input)?,
     };
@@ -150,6 +136,5 @@ pub fn build_tape_cpu(input: &[u8], mode: Mode) -> Result<Tape, Error> {
     Ok(Tape {
         structural: TapeStorage::from(structural),
         pair_pos: TapeStorage::from(pair_pos),
-        depth,
     })
 }

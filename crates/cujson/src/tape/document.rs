@@ -517,7 +517,6 @@ mod tests {
         let tape = Tape {
             structural: TapeStorage::from(structural),
             pair_pos: TapeStorage::from(pair_pos),
-            depth: 2,
         };
         Document::new(Cow::Borrowed(input), tape)
     }
@@ -573,7 +572,6 @@ mod tests {
         let tape = Tape {
             structural: TapeStorage::from(structural),
             pair_pos: TapeStorage::from(pair_pos),
-            depth: 1,
         };
         let doc = Document::new(Cow::Borrowed(input), tape);
         let v = doc.root().get("k").unwrap();
