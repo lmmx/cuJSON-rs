@@ -1,0 +1,2 @@
+[alias]
+gpu-verify = "run --release -p cujson-cli --features cuda -- verify"

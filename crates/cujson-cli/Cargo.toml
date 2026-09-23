@@ -13,7 +13,16 @@ name = "cujson"
 path = "src/main.rs"
 
 [features]
+default = []
 cuda = ["cujson/cuda"]
+simd-json = ["dep:simd-json"]
 
 [dependencies]
-cujson.workspace = true
+cujson = { workspace = true, features = ["cpu-reference", "serde"] }
+clap = { workspace = true }
+serde_json.workspace = true
+simd-json = { version = "0.13", optional = true }
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
