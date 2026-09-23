@@ -34,7 +34,11 @@ Setup for every row: committed file (1,818 rows, 233.4 MB of JSON Lines), 20 CPU
 | chunk_10-00008-of-00017 | 4,200 | 239.9 MB | 57,109 B | 1,435,036 B | 8 | 0.098 | 0.064 | 0.058 | 0.041 |
 | chunk_3-00031-of-00064 | 4,851 | 246.8 MB | 50,866 B | 520,078 B | 8 | 0.078 | 0.056 | 0.051 | 0.037 |
 
-- `simd-par` throughput on those files reads 2.72, 2.45 and 3.18 GB/s (2.30 GB/s on chunk_0-00283); `cujson-pipe` reads 4.50, 3.73 and 4.42 GB/s (4.2 to 4.5 GB/s on chunk_0-00283); ratios of `simd-par` to `cujson-pipe` are 1.64, 1.53 and 1.39 against about 1.9 for chunk_0-00283
+| chunk_0-00004-of-00546 | 1,818 | 1,648.9 MB | 906,987 B | 5,521,478 B | 51 | 1.232 | 0.370 | 0.357 | 0.353 |
+| chunk_2-00114-of-00144 | 4,095 | 93.6 MB | 22,864 B | 840,191 B | 3 | 0.031 | 0.023 | 0.019 | 0.014 |
+
+- `simd-par` reads 1.34 GB/s on chunk_0-00004 (`copy` 0.108 s, `parse+walk` 1.123 s, +539 MB RSS) and 3.07 GB/s on chunk_2-00114; `cujson-pipe` reads 4.45 GB/s (+588 MB RSS) and 4.05 GB/s (+162 MB RSS); ratios are 3.3 and 1.35
+- `simd-par` throughput on the earlier three files reads 2.72, 2.45 and 3.18 GB/s (2.30 GB/s on chunk_0-00283); `cujson-pipe` reads 4.50, 3.73 and 4.42 GB/s (4.2 to 4.5 GB/s on chunk_0-00283); ratios of `simd-par` to `cujson-pipe` are 1.64, 1.53 and 1.39 against about 1.9 for chunk_0-00283
 - Local pipeline copies range from 13 MB (`chunk_2-00114-of-00144`) to 751 MB (`chunk_0-00000-of-00546`) of parquet; the ten largest are all chunk_0 files of 488 MB to 751 MB
 
 
