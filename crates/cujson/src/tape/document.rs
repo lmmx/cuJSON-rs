@@ -216,7 +216,7 @@ impl<'a> Document<'a> {
     }
 }
 
-fn scalar_kind(bytes: &[u8]) -> Kind {
+pub(super) fn scalar_kind(bytes: &[u8]) -> Kind {
     match bytes.first() {
         Some(b'"') => Kind::String,
         Some(b't') | Some(b'f') => Kind::Bool,
@@ -288,7 +288,7 @@ fn parse_hex4(bytes: &[u8], start: usize) -> Result<u32, Error> {
     u32::from_str_radix(s, 16).map_err(|_| Error::InvalidEscape)
 }
 
-fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
+pub(super) fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
     if !bytes.contains(&b'\\') {
         return std::str::from_utf8(bytes)
             .map(Cow::Borrowed)
