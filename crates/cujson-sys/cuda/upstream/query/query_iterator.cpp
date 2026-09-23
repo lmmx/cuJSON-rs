@@ -603,7 +603,7 @@ string cuJSONLinesIterator::getKey(){
         // cout << "key---->" << key << endl;
         return key;
     }else{
-        throw cujson_error{CUJSON_ERR_INTERNAL};
+        throw cujson_error{cujson_err::INTERNAL};
     }
 }
 

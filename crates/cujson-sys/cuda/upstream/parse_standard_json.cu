@@ -1575,7 +1575,7 @@ int32_t* Parser(uint8_t* open_close_GPU, int32_t** open_close_index_d,  int32_t*
         cudaFreeAsync(pairError_GPU, 0);
         cudaFreeAsync(open_close_GPU, 0);
         cudaFreeAsync(depth, 0);
-        throw cujson_error{CUJSON_ERR_UNBALANCED};
+        throw cujson_error{cujson_err::UNBALANCED};
     }
 
 
@@ -1632,7 +1632,7 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     cudaStreamSynchronize(0);
     if(!isValidUTF8) {
         cudaFree(d_jsonContent);
-        throw cujson_error{CUJSON_ERR_UTF8};
+        throw cujson_error{cujson_err::UTF8};
     }
 
 

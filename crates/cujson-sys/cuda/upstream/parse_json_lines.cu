@@ -1066,7 +1066,7 @@ int32_t* stage3_parser(uint8_t* open_close_bitmap, int32_t** open_close_index_d,
         cudaFreeAsync(pairError_GPU, 0);
         cudaFreeAsync(open_close_bitmap, 0);
         cudaFreeAsync(depth, 0);
-        throw cujson_error{CUJSON_ERR_UNBALANCED};
+        throw cujson_error{cujson_err::UNBALANCED};
     }
 
     result_size = structural_cnt;
@@ -1181,7 +1181,7 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
             for (size_t j = 0; j < i; j++) {
                 cudaFreeHost(res_buf_arrays[j]);
             }
-            throw cujson_error{CUJSON_ERR_UTF8};
+            throw cujson_error{cujson_err::UTF8};
         }
 
         // Tokenization
