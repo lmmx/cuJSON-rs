@@ -161,6 +161,23 @@ pub fn parse_lines(input: &[u8], opts: LinesOptions) -> Result<Document<'_>, Err
     }
 }
 
+/// Parse owned `input` as JSON Lines on the GPU, returning a `'static`
+/// `Document` that owns its bytes (mirrors [`parse_owned`] for
+/// [`parse_lines`]).
+pub fn parse_lines_owned(input: Vec<u8>, opts: LinesOptions) -> Result<Document<'static>, Error> {
+    check_size(input.len())?;
+    #[cfg(feature = "cuda")]
+    {
+        let tape = ffi::parse_lines(&input, opts.chunk_bytes)?;
+        Ok(Document::new(Cow::Owned(input), tape))
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        let _ = (input, opts);
+        Err(Error::CudaNotCompiled)
+    }
+}
+
 /// Read `path` and parse it as standard JSON on the GPU.
 pub fn parse_file(path: impl AsRef<Path>) -> Result<Document<'static>, Error> {
     let bytes = std::fs::read(path)?;
@@ -225,6 +242,13 @@ mod tests_no_cuda {
         // this must not report CudaNotCompiled instead.
         let err = super::parse(b"").unwrap_err();
         assert!(matches!(err, super::Error::EmptyInput));
+    }
+
+    #[test]
+    fn parse_lines_owned_without_cuda_feature_errors() {
+        let err =
+            super::parse_lines_owned(b"{}".to_vec(), super::LinesOptions::default()).unwrap_err();
+        assert!(matches!(err, super::Error::CudaNotCompiled));
     }
 }
 
