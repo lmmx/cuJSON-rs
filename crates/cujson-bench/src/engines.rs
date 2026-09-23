@@ -17,22 +17,32 @@ pub enum Engine {
     SimdBuf,
     /// simd-json, rayon over rows, per-thread reused buffers
     SimdBufPar,
-    /// cuJSON GPU parse, one-thread tape walk
-    Cujson,
-    /// cuJSON GPU parse, rayon tape walk
-    CujsonPar,
-    /// cuJSON's CPU-reference tape builder, one-thread tape walk (isolates the walk from the GPU)
-    CujsonRef,
-    /// cuJSON GPU parse, single-pass `Document::visit`
-    CujsonLin,
-    /// CPU-reference tape, single-pass `Document::visit`
-    CujsonRefLin,
+    /// cuJSON tape, walked with `Node` navigation, one thread
+    CujsonNode,
+    /// cuJSON tape, `Node` navigation over lines in rayon
+    CujsonNodePar,
+    /// cuJSON tape, single-pass `Document::visit`
+    CujsonVisit,
+    /// cuJSON tape, `Document::visit_range` over row ranges in rayon
+    CujsonVisitPar,
 }
 
 impl Engine {
-    pub fn is_gpu(self) -> bool {
-        matches!(self, Engine::Cujson | Engine::CujsonPar | Engine::CujsonLin)
+    pub fn is_cujson(self) -> bool {
+        !matches!(
+            self,
+            Engine::Simd | Engine::SimdPar | Engine::SimdBuf | Engine::SimdBufPar
+        )
     }
+}
+
+/// Where a cuJSON engine gets its tape.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum Tape {
+    /// `cujson::parse_lines` (needs the `cuda` feature and a GPU)
+    Gpu,
+    /// `cujson::cpu::parse`, the sequential reference builder (isolates the walk from the GPU)
+    Cpu,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
@@ -59,16 +69,11 @@ fn rows_mut(work: &mut [u8]) -> impl Iterator<Item = &mut [u8]> {
     work.split_mut(|&b| b == b'\n').filter(|r| !r.is_empty())
 }
 
-pub fn run_batch(engine: Engine, level: Level, batch: &Batch) -> Result<Run, String> {
-    match engine {
-        Engine::Simd | Engine::SimdPar | Engine::SimdBuf | Engine::SimdBufPar => {
-            Ok(run_simd(engine, level, batch))
-        }
-        Engine::Cujson
-        | Engine::CujsonPar
-        | Engine::CujsonRef
-        | Engine::CujsonLin
-        | Engine::CujsonRefLin => run_cujson(engine, level, batch),
+pub fn run_batch(engine: Engine, level: Level, tape: Tape, batch: &Batch) -> Result<Run, String> {
+    if engine.is_cujson() {
+        run_cujson(engine, level, tape, batch)
+    } else {
+        Ok(run_simd(engine, level, batch))
     }
 }
 
@@ -118,17 +123,20 @@ fn run_simd(engine: Engine, level: Level, batch: &Batch) -> Run {
     }
 }
 
-fn run_cujson(engine: Engine, level: Level, batch: &Batch) -> Result<Run, String> {
+fn run_cujson(engine: Engine, level: Level, tape: Tape, batch: &Batch) -> Result<Run, String> {
     let t = Instant::now();
-    let cpu = matches!(engine, Engine::CujsonRef | Engine::CujsonRefLin);
-    let doc = if cpu {
-        cujson::cpu::parse(&batch.bytes, cujson::cpu::Mode::Lines).map_err(|e| e.to_string())?
-    } else {
-        cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
-            .map_err(|e| e.to_string())?
+    let doc = match tape {
+        Tape::Cpu => {
+            cujson::cpu::parse(&batch.bytes, cujson::cpu::Mode::Lines).map_err(|e| e.to_string())?
+        }
+        Tape::Gpu => cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
+            .map_err(|e| e.to_string())?,
     };
     let parse = t.elapsed();
-    let parse_name = if cpu { "cpu tape build" } else { "gpu parse" };
+    let parse_name = match tape {
+        Tape::Cpu => "cpu tape build",
+        Tape::Gpu => "gpu parse",
+    };
     if level == Level::Parse {
         let t = Instant::now();
         drop(black_box(doc));
@@ -138,21 +146,33 @@ fn run_cujson(engine: Engine, level: Level, batch: &Batch) -> Result<Run, String
             hash: 0,
         });
     }
+    let sum = |a: (u64, u64), b: (u64, u64)| (a.0 + b.0, a.1.wrapping_add(b.1));
     let t = Instant::now();
-    let (rows, hash) = if matches!(engine, Engine::CujsonLin | Engine::CujsonRefLin) {
-        let mut v = HashVisitor::default();
-        doc.visit(&mut v).map_err(|e| e.to_string())?;
-        (v.rows, v.hash)
-    } else if engine == Engine::CujsonPar {
-        let nodes: Vec<_> = doc.lines().collect();
-        nodes
-            .par_iter()
-            .map(|n| (1u64, walk_cujson(*n)))
-            .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1.wrapping_add(b.1)))
-    } else {
-        doc.lines().fold((0u64, 0u64), |a, n| {
-            (a.0 + 1, a.1.wrapping_add(walk_cujson(n)))
-        })
+    let (rows, hash) = match engine {
+        Engine::CujsonNode => doc
+            .lines()
+            .fold((0u64, 0u64), |a, n| sum(a, (1, walk_cujson(n)))),
+        Engine::CujsonNodePar => {
+            let nodes: Vec<_> = doc.lines().collect();
+            nodes
+                .par_iter()
+                .map(|n| (1u64, walk_cujson(*n)))
+                .reduce(|| (0, 0), sum)
+        }
+        Engine::CujsonVisit => {
+            let mut v = HashVisitor::default();
+            doc.visit(&mut v).map_err(|e| e.to_string())?;
+            (v.rows, v.hash)
+        }
+        _ => doc
+            .split_lines(rayon::current_num_threads() * 16)
+            .into_par_iter()
+            .map(|r| {
+                let mut v = HashVisitor::default();
+                doc.visit_range(r, &mut v).expect("visit_range");
+                (v.rows, v.hash)
+            })
+            .reduce(|| (0, 0), sum),
     };
     let walk = t.elapsed();
     let t = Instant::now();

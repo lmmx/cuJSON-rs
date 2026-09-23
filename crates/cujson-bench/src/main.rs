@@ -5,7 +5,7 @@ mod walk;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use engines::{Engine, Level, run_batch};
+use engines::{Engine, Level, Tape, run_batch};
 
 #[derive(Parser)]
 struct Cli {
@@ -37,8 +37,11 @@ enum Cmd {
     Run {
         #[command(flatten)]
         input: Input,
-        #[arg(long, value_enum, value_delimiter = ',', default_values_t = [Engine::Simd, Engine::SimdPar, Engine::SimdBuf, Engine::SimdBufPar, Engine::Cujson, Engine::CujsonPar])]
+        #[arg(long, value_enum, value_delimiter = ',', default_values_t = [Engine::Simd, Engine::SimdPar, Engine::SimdBuf, Engine::SimdBufPar, Engine::CujsonNode, Engine::CujsonNodePar, Engine::CujsonVisit, Engine::CujsonVisitPar])]
         engines: Vec<Engine>,
+        /// Tape source for the cujson-* engines
+        #[arg(long, value_enum, default_value_t = Tape::Gpu)]
+        tape: Tape,
         #[arg(long, value_enum, value_delimiter = ',', default_values_t = [Level::Parse, Level::Walk])]
         levels: Vec<Level>,
         #[arg(long, default_value_t = 5)]
@@ -100,10 +103,11 @@ fn main() {
             input,
             engines,
             levels,
+            tape,
             reps,
             warmup,
             json,
-        } => bench(&input, &engines, &levels, reps, warmup, json),
+        } => bench(&input, &engines, &levels, tape, reps, warmup, json),
         Cmd::Verify { input, rows } => verify(&input, rows),
     }
 }
@@ -112,6 +116,7 @@ fn bench(
     input: &Input,
     engines: &[Engine],
     levels: &[Level],
+    tape: Tape,
     reps: usize,
     warmup: usize,
     json: bool,
@@ -137,7 +142,8 @@ fn bench(
     let mut reference: Vec<(Level, u64, u64)> = vec![];
 
     for &engine in engines {
-        if engine.is_gpu()
+        if engine.is_cujson()
+            && tape == Tape::Gpu
             && let Err(e) = cujson::parse_lines(b"{}\n", cujson::LinesOptions::default())
         {
             eprintln!("{engine:?}: unavailable ({e})");
@@ -154,7 +160,7 @@ fn bench(
                 let (mut r, mut h) = (0, 0u64);
                 let mut total = Duration::ZERO;
                 for b in &corpus.batches {
-                    match run_batch(engine, level, b) {
+                    match run_batch(engine, level, tape, b) {
                         Ok(run) => {
                             if phases.is_empty() {
                                 phases = vec![0.0; run.phases.len()];

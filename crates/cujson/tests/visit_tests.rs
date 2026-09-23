@@ -74,6 +74,20 @@ fn check(bytes: &[u8], mode: Mode) {
     let mut got = Recorder::default();
     doc.visit(&mut got).expect("visit");
     assert_eq!(got.0, want, "{}", String::from_utf8_lossy(bytes));
+    for parts in [1, 2, 3, 7, 64] {
+        let mut joined = Recorder::default();
+        let ranges = doc.split_lines(parts);
+        assert!(ranges.len() <= parts.max(1));
+        for r in ranges {
+            doc.visit_range(r, &mut joined).expect("visit_range");
+        }
+        assert_eq!(
+            joined.0,
+            want,
+            "parts={parts}: {}",
+            String::from_utf8_lossy(bytes)
+        );
+    }
 }
 
 #[test]

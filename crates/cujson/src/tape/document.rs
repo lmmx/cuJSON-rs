@@ -192,6 +192,16 @@ impl<'a> Document<'a> {
         self.read_value(0)
     }
 
+    /// Tape index of the separator (or closing wrapper) that follows each
+    /// top-level value, in order, including blank lines. Hops over
+    /// containers with `pair_pos`, so it touches one entry per line.
+    pub(super) fn top_level_delims(&self) -> impl Iterator<Item = usize> + '_ {
+        children_iter(self, 0, self.total() - 1).map(|node| match node.repr {
+            NodeRepr::Container { close, .. } => close + 1,
+            NodeRepr::Scalar { hi, .. } => hi,
+        })
+    }
+
     /// Iterate the top-level values of a JSON Lines document (or the single
     /// root value of a standard document, as a one-element iterator).
     ///

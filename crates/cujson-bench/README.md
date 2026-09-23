@@ -11,9 +11,11 @@ committed; `fetch.sh` re-downloads it from the pinned HuggingFace revision and c
 # correctness gate: per-row checksums of simd-json vs cuJSON's CPU tape (and the GPU tape if built with cuda)
 cargo run --release -p cujson-bench -- verify
 
-# timing (GPU engines need the cuda feature and a GPU)
+# timing (cujson-* engines need the cuda feature and a GPU)
 CUJSON_CUDA_ARCHS=86 cargo run --release -p cujson-bench --features cuda -- run
-cargo run --release -p cujson-bench --features cuda -- run --engines cujson --json
+cargo run --release -p cujson-bench --features cuda -- run --engines cujson-visit-par --json
+# the same walks over the sequential CPU-built tape, no GPU needed
+cargo run --release -p cujson-bench -- run --tape cpu --levels walk
 ```
 
 ## What is measured
@@ -29,16 +31,18 @@ Two levels, per engine:
 
 The `walk` checksums are compared across engines; a mismatch aborts the run.
 
-| Engine | Parse | Threads |
-|---|---|---|
-| `simd` | `simd_json::to_borrowed_value` per row | 1 |
-| `simd-par` | same, rayon over rows: how `genson-rs` runs | all |
-| `simd-buf`, `simd-buf-par` | same, with reused `simd_json::Buffers` | 1 / all |
-| `cujson` | `cujson::parse_lines` on the GPU, then a serial tape walk | GPU + 1 |
-| `cujson-par` | same, tape walk in rayon | GPU + all |
+| Engine | Parse | Walk | Threads |
+|---|---|---|---|
+| `simd` | `simd_json::to_borrowed_value` per row | DOM | 1 |
+| `simd-par` | same, rayon over rows: how `genson-rs` runs | DOM | all |
+| `simd-buf`, `simd-buf-par` | same, with reused `simd_json::Buffers` | DOM | 1 / all |
+| `cujson-node` | `--tape`: `gpu` = `cujson::parse_lines`, `cpu` = `cujson::cpu::parse` | `Node` navigation | 1 |
+| `cujson-node-par` | same | `Node` navigation, rayon over lines | all |
+| `cujson-visit` | same | `Document::visit`, one pass over the tape | 1 |
+| `cujson-visit-par` | same | `Document::visit_range` over `Document::split_lines` ranges in rayon | all |
 
 Reported phases: simd-json's `copy` is the mutable copy of the batch it needs because it parses in
-place; cuJSON's `gpu parse` is one call covering host-to-device copy, kernels and the copy of the
+place; cuJSON's `gpu parse` (`cpu tape build` with `--tape cpu`) is one call covering host-to-device copy, kernels and the copy of the
 tape back to pinned host memory; `walk` is CPU navigation of the tape; `free` is dropping the
 document. `peak RSS` is the process high-water mark above the loaded corpus.
 
