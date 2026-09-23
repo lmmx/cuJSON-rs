@@ -4,7 +4,7 @@
 #include <iostream>
 
 
-cuJSONInput loadJSON(const std::string& filePath) { 
+static cuJSONInput loadJSON(const std::string& filePath) { 
     // ______________________LOAD_FILE_____________________________
     std::ifstream file(filePath, std::ios::binary | std::ios::ate);                     // Open in binary mode, seek to end
     if (!file) {                                                                        // unable to open file
@@ -33,7 +33,7 @@ cuJSONInput loadJSON(const std::string& filePath) {
     return {h_buffer, fileSize}; // Return the buffer and its size
 }
 
-cuJSONLinesInput loadJSONLines_chunkCount(const std::string& filePath, size_t chunkCount = 1) { 
+static cuJSONLinesInput loadJSONLines_chunkCount(const std::string& filePath, size_t chunkCount = 1) { 
     cuJSONLinesInput input; 
     input.data = nullptr;
     input.size = 0;
@@ -102,7 +102,7 @@ cuJSONLinesInput loadJSONLines_chunkCount(const std::string& filePath, size_t ch
     return input; // Return the buffer and its size
 }
 
-cuJSONLinesInput loadJSONLines_chunkSizeBytes(const std::string& filePath, size_t chunkSizeBytes) {
+static cuJSONLinesInput loadJSONLines_chunkSizeBytes(const std::string& filePath, size_t chunkSizeBytes) {
     cuJSONLinesInput input;
     input.data = nullptr;
     input.size = 0;
@@ -173,7 +173,7 @@ cuJSONLinesInput loadJSONLines_chunkSizeBytes(const std::string& filePath, size_
     return input;
 }
 
-cuJSONLinesInput loadJSONLines_chunkSizeMegaBytes(const std::string& filePath, size_t chunkSizeMegaBytes) {
+static cuJSONLinesInput loadJSONLines_chunkSizeMegaBytes(const std::string& filePath, size_t chunkSizeMegaBytes) {
     cuJSONLinesInput input;
     input.data = nullptr;
     input.size = 0;

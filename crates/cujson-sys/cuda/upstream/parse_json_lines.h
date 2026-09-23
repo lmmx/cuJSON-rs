@@ -1,11 +1,13 @@
-#ifndef STANDARD_PARSE_H
-#define STANDARD_PARSE_H
+#ifndef JSON_LINES_PARSE_H
+#define JSON_LINES_PARSE_H
 
 #include <string>
 #include "cujson_types.h"
 
-// Function prototype for standard_parse
+// Function prototype for json_lines parse
 // cuJSONResult standard_json_parse(uint8_t* h_jsonContent);
+namespace cujson_lines {
 cuJSONResult parse_json_lines(cuJSONLinesInput input);
+} // namespace cujson_lines
 
-#endif // STANDARD_PARSE_H
+#endif // JSON_LINES_PARSE_H

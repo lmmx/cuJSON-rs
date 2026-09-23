@@ -146,7 +146,7 @@ uint64_t prefix_xor64(uint64_t x) {
 // ______________________check_CUDA_______________________
 // Function to check the status of a CUDA API call and handle errors if any.
 // If the CUDA call fails, the function prints the error message and terminates the program.
-void checkCuda(cudaError_t result) {
+static void checkCuda(cudaError_t result) {
     if (result != cudaSuccess) { // Check if the CUDA call did not succeed.
         // Print the error message associated with the CUDA error.
         fprintf(stderr, "CUDA Runtime Error: %s\n", cudaGetErrorString(result));
@@ -165,7 +165,7 @@ void checkCuda(cudaError_t result) {
 // The input array is expected to be a device pointer to an array of uint8_t values.
 // The length parameter specifies the number of elements in the array.
 // The function returns the count of ones found in the device array.
-uint32_t count_ones_cub(uint8_t* d_flags, size_t length){
+static uint32_t count_ones_cub(uint8_t* d_flags, size_t length){
     // 1. temporary‑storage query
     void*  d_temp  = nullptr;
     size_t temp_sz = 0;
@@ -196,7 +196,7 @@ uint32_t count_ones_cub(uint8_t* d_flags, size_t length){
     return h_count;
 }
 
-uint32_t reduce_cub_int(int8_t* d_flags, size_t length){
+static uint32_t reduce_cub_int(int8_t* d_flags, size_t length){
     // 1. temporary‑storage query
     void*  d_temp  = nullptr;
     size_t temp_sz = 0;
@@ -242,7 +242,7 @@ uint32_t reduce_cub_int(int8_t* d_flags, size_t length){
 // The function does not return any value.
 // It allocates temporary storage for the scan operation, performs the scan, and then frees the temporary storage.
 // The function is designed to be efficient and uses CUB's parallel algorithms for the scan operation.
-void inclusive_scan_inplace_cub(int8_t* d_data, size_t length) {
+static void inclusive_scan_inplace_cub(int8_t* d_data, size_t length) {
     // Allocate temp buffer
     void* d_temp = nullptr;
     size_t temp_bytes = 0;
@@ -318,7 +318,7 @@ uint32_t count_virtual_flags_cub(FlagIter flags, size_t length ) {
 // It allocates temporary storage for the scatter operation, performs the scatter, and then frees the temporary storage.
 // The function is designed to be efficient and uses CUB's parallel algorithms for the scatter operation.
 
-void scatter_cub(
+static void scatter_cub(
     const uint32_t* d_token_indices,        // input data
     const uint8_t* d_output_flag,           // 0/1 flag for selection
     uint32_t* d_selected_token_indices,     // output buffer (preallocated)

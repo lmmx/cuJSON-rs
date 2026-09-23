@@ -3,6 +3,8 @@
 #include "cujson_error.h"
 
 
+namespace cujson_std {
+
 // prev1            --> 4 character
 // result           --> source
 // size             --> total size of array
@@ -1699,3 +1701,4 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     return parsed_tree;
 }
 
+} // namespace cujson_std
