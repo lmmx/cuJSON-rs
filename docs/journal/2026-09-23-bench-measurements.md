@@ -26,6 +26,18 @@ Setup for every row: committed file (1,818 rows, 233.4 MB of JSON Lines), 20 CPU
 - The first fb4aab3 rows ran `cujson-pipe` alone; whether the checksum reference added in 6f08964 was part of that build is not known, because 6f08964 was committed while that run was in flight; the second run (6f08964 row) started after 6f08964 was in the working tree and printed results for all three thread counts, so each passed the `simd-par` reference check
 - Run-to-run spread at 32 MB, pinned input, `cujson-pipe`: 2 GPU threads 0.049 s and 0.052 s, 3 GPU threads 0.052 s and 0.050 s, 1 GPU thread 0.054 s in both runs, `[min-max]` ranges of 0.001 s to 0.005 s within a run
 
+### Other files (`run --input <file> --batch-mb 32 --pinned-input --engines simd-par,cujson-pipe --levels walk`, master at d094037)
+
+| File (pipeline copy) | Rows | Claims JSON | Mean row | Max row | Batches | `simd-par` | `cujson-pipe` | `parse busy` | `walk busy` |
+|---|---|---|---|---|---|---|---|---|---|
+| chunk_5-00037-of-00042 | 3,735 | 250.8 MB | 67,142 B | 1,280,862 B | 8 | 0.092 | 0.056 | 0.052 | 0.038 |
+| chunk_10-00008-of-00017 | 4,200 | 239.9 MB | 57,109 B | 1,435,036 B | 8 | 0.098 | 0.064 | 0.058 | 0.041 |
+| chunk_3-00031-of-00064 | 4,851 | 246.8 MB | 50,866 B | 520,078 B | 8 | 0.078 | 0.056 | 0.051 | 0.037 |
+
+- `simd-par` throughput on those files reads 2.72, 2.45 and 3.18 GB/s (2.30 GB/s on chunk_0-00283); `cujson-pipe` reads 4.50, 3.73 and 4.42 GB/s (4.2 to 4.5 GB/s on chunk_0-00283); ratios of `simd-par` to `cujson-pipe` are 1.64, 1.53 and 1.39 against about 1.9 for chunk_0-00283
+- Local pipeline copies range from 13 MB (`chunk_2-00114-of-00144`) to 751 MB (`chunk_0-00000-of-00546`) of parquet; the ten largest are all chunk_0 files of 488 MB to 751 MB
+
+
 ### Batch-size sweeps
 
 - `simd-par` at 4, 8, 16, 32, 64, 128, 256 MB batches (commit 63a7ea2 era, then earlier for 4 and 8): 0.154, 0.146, 0.126 (0.123 on a later run), 0.110, 0.148, 0.147, 0.140 s, with the `copy` phase 0.018, 0.022, 0.019, 0.019, 0.066, 0.071, 0.068 s
