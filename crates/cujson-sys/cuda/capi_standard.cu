@@ -16,7 +16,6 @@ extern "C" cujson_status cujson_parse_standard(const uint8_t* data, size_t size,
     out->structural = nullptr;
     out->pair_pos = nullptr;
     out->len = 0;
-    out->depth = 0;
     out->cuda_error = 0;
     out->_alloc = nullptr;
 
@@ -63,7 +62,6 @@ extern "C" cujson_status cujson_parse_standard(const uint8_t* data, size_t size,
     out->structural = result.structural;
     out->pair_pos = result.pair_pos;
     out->len = static_cast<size_t>(result.totalResultSize);
-    out->depth = static_cast<int32_t>(result.depth);
     out->_alloc = result.structural;
     return CUJSON_OK;
 }

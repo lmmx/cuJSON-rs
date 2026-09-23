@@ -30,7 +30,6 @@ pub struct cujson_tape {
     pub structural: *mut i32,
     pub pair_pos: *mut i32,
     pub len: usize,
-    pub depth: i32,
     pub cuda_error: i32,
     pub _alloc: *mut core::ffi::c_void,
 }
@@ -41,7 +40,6 @@ impl Default for cujson_tape {
             structural: core::ptr::null_mut(),
             pair_pos: core::ptr::null_mut(),
             len: 0,
-            depth: 0,
             cuda_error: 0,
             _alloc: core::ptr::null_mut(),
         }

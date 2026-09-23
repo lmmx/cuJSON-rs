@@ -26,13 +26,12 @@ fn cujson_tape_matches_c_header() {
 #include "cujson_capi.h"
 
 int main(void) {
-    printf("%zu %zu %zu %zu %zu %zu %zu %zu %d %d %d %d %d %d %d\n",
+    printf("%zu %zu %zu %zu %zu %zu %zu %d %d %d %d %d %d %d\n",
         sizeof(cujson_tape),
         (size_t)_Alignof(cujson_tape),
         offsetof(cujson_tape, structural),
         offsetof(cujson_tape, pair_pos),
         offsetof(cujson_tape, len),
-        offsetof(cujson_tape, depth),
         offsetof(cujson_tape, cuda_error),
         offsetof(cujson_tape, _alloc),
         (int)CUJSON_OK,
@@ -67,12 +66,12 @@ int main(void) {
     let stdout = String::from_utf8(output.stdout).expect("probe output not UTF-8");
     let fields: Vec<usize> = stdout
         .split_whitespace()
-        .take(8)
+        .take(7)
         .map(|s| s.parse().expect("probe printed a non-numeric field"))
         .collect();
     let statuses: Vec<i32> = stdout
         .split_whitespace()
-        .skip(8)
+        .skip(7)
         .map(|s| s.parse().expect("probe printed a non-numeric status"))
         .collect();
 
@@ -103,16 +102,11 @@ int main(void) {
     );
     assert_eq!(
         fields[5],
-        core::mem::offset_of!(cujson_sys::cujson_tape, depth),
-        "offsetof(depth)"
-    );
-    assert_eq!(
-        fields[6],
         core::mem::offset_of!(cujson_sys::cujson_tape, cuda_error),
         "offsetof(cuda_error)"
     );
     assert_eq!(
-        fields[7],
+        fields[6],
         core::mem::offset_of!(cujson_sys::cujson_tape, _alloc),
         "offsetof(_alloc)"
     );

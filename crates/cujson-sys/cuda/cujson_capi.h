@@ -30,8 +30,6 @@ typedef struct {
   int32_t* structural;   /* length = len, owned, pinned host memory */
   int32_t* pair_pos;     /* length = len, points into the same allocation as structural */
   size_t   len;          /* = cuJSONResult::totalResultSize */
-  int32_t  depth;        /* = cuJSONResult::depth; upstream never sets this field (task 02
-                           * journal entry) - treat as unreliable until upstream initializes it */
   int32_t  cuda_error;   /* cudaError_t when status == CUJSON_ERR_CUDA, else 0 */
   void*    _alloc;       /* allocation to free; opaque, pass to cujson_tape_free */
 } cujson_tape;

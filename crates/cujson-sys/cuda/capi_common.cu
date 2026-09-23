@@ -14,7 +14,6 @@ extern "C" void cujson_tape_free(cujson_tape* tape) {
     tape->structural = nullptr;
     tape->pair_pos = nullptr;
     tape->len = 0;
-    tape->depth = 0;
     tape->cuda_error = 0;
     tape->_alloc = nullptr;
 }
