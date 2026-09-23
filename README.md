@@ -1,5 +1,31 @@
 # cuJSON-rs
-Rust implementation of cuJSON: A Highly Parallel JSON Parser for GPUs (ASPLOS ‘26)
+
+[cuJSON](https://github.com/AutomataLab/cuJSON) (ASPLOS '26) parses JSON and JSON Lines on an
+NVIDIA GPU. cuJSON-rs packages its CUDA kernels so they build with `cargo` and install with
+`pip`, with no manual `nvcc` step.
+
+| Package | Install | Docs |
+|---|---|---|
+| Python | `pip install cujson` | [crates/cujson-py](crates/cujson-py/README.md) |
+| Rust | `cargo add cujson --features cuda` | [crates/cujson](crates/cujson/README.md) |
+| Raw FFI | `cargo add cujson-sys` | [crates/cujson-sys](crates/cujson-sys/README.md) |
+| CLI | `cargo install --path crates/cujson-cli --features cuda` | `cujson --help` |
+
+The Python wheel targets Linux x86_64 with an NVIDIA driver supporting CUDA 13 (R580 or newer)
+and a GPU of compute capability 7.5 or newer. Building from source needs the CUDA toolkit (12.1
+or newer).
+
+To check everything against your GPU from a checkout:
+
+```
+CUJSON_CUDA_ARCHS=86 cargo gpu-verify   # set to your GPU's compute capability, or omit to build all
+```
+
+The kernels are upstream cuJSON's, copied from commit `38d27b6` and patched to be usable as a
+library (see [crates/cujson-sys](crates/cujson-sys/README.md) and `docs/journal/`). cuJSON is by
+Ashkan Vedadi Gargary, Soroosh Safari Loaliyan and Zhijia Zhao; cite
+[CuJSON: A Highly Parallel JSON Parser for GPUs](https://doi.org/10.1145/3760250.3762222) if you
+use it in research. Both projects are MIT licensed.
 
 ## Building and releasing
 
@@ -41,35 +67,17 @@ checkout instead: `pip install ./crates/cujson-py` or `cargo build --release -p 
 One version, `[workspace.package] version` in the root `Cargo.toml`, covers every crate and the
 Python wheel (maturin reads it). The Python package shares its name, `cujson`, with the main crate.
 
-#### First release (manual)
+**Prerequisite (one-time):** trusted publishing must be configured before the first tagged
+release, or its publish jobs fail. Point each at repository `lmmx/cuJSON-rs`, workflow
+`release.yml`:
 
-Trusted publishing on crates.io can only be configured for a crate that already exists, so the
-first release is published by hand.
+- PyPI project `cujson`: Manage → Publishing → add a GitHub publisher with environment `pypi`,
+  and create a `pypi` environment in this repository's Settings → Environments.
+- crates.io crates `cujson` and `cujson-sys`: Settings → Trusted Publishing.
 
-1. crates.io, from a clean checkout of `master` (after `cargo login`):
-   ```
-   cargo publish -p cujson-sys
-   cargo publish -p cujson
-   ```
-2. PyPI: build the manylinux wheel in CI rather than locally (a local build is tagged for your
-   own glibc). Run `release.yml` from the Actions tab (manual runs are dry runs that publish
-   nothing), then:
-   ```
-   gh run download <run-id> -n wheel-cu13 -D dist
-   uv publish dist/*.whl
-   ```
-3. Configure trusted publishing, all pointing at repository `lmmx/cuJSON-rs`, workflow
-   `release.yml`:
-   - crates.io: on each of `cujson-sys` and `cujson`, Settings → Trusted Publishing.
-   - PyPI: on `cujson`, Publishing → add a GitHub publisher with environment `pypi`, and
-     create the `pypi` environment in the repository settings.
+Version 0.1.0 was published by hand (no `v0.1.0` tag exists, deliberately).
 
-Don't push a `v0.1.0` tag for the manual release: it would start `release.yml`, which would fail
-trying to publish versions that already exist.
-
-#### Later releases
-
-From an up-to-date, clean `master`:
+Then, from an up-to-date, clean `master`:
 
 ```
 just release          # or: just release minor / just release major

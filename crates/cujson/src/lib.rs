@@ -344,3 +344,8 @@ mod tests_cuda_no_device {
         );
     }
 }
+
+/// Compiles the README's examples as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

@@ -4,14 +4,32 @@ build-backend = "maturin"
 
 [project]
 name = "cujson"
+description = "GPU JSON and JSON Lines parsing with cuJSON (ASPLOS '26)"
+readme = "README.md"
+authors = [{ name = "Louis Maddox", email = "louismmx@gmail.com" }]
+license = "MIT"
 requires-python = ">=3.10"
+keywords = ["json", "jsonl", "parser", "gpu", "cuda"]
 classifiers = [
-    "Programming Language :: Rust",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.10",
+  "Development Status :: 3 - Alpha",
+  "Environment :: GPU :: NVIDIA CUDA :: 13",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Rust",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Text Processing",
 ]
-dynamic = ["version", "description"]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/lmmx/cuJSON-rs"
+Repository = "https://github.com/lmmx/cuJSON-rs"
+Issues = "https://github.com/lmmx/cuJSON-rs/issues"
+Upstream = "https://github.com/AutomataLab/cuJSON"
 
 [dependency-groups]
 dev = ["pytest"]
