@@ -7,6 +7,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["external-ffi-bindings", "parser-implementations", "hardware-support"]
+documentation = "https://docs.rs/cujson-sys"
+readme = "README.md"
 description = "Raw FFI bindings to cuJSON, compiled with nvcc when the `cuda` feature is on"
 
 [features]

@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["parser-implementations", "encoding", "hardware-support"]
+documentation = "https://docs.rs/cujson"
+readme = "README.md"
 description.workspace = true
 
 [features]
@@ -19,3 +25,7 @@ serde_json = { workspace = true, optional = true }
 [dev-dependencies]
 proptest.workspace = true
 serde_json.workspace = true
+
+# docs.rs has no CUDA toolkit, so document the API without the `cuda` feature.
+[package.metadata.docs.rs]
+features = ["serde", "cpu-reference"]

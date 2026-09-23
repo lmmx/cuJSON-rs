@@ -8,6 +8,9 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/lmmx/cuJSON-rs"
+homepage = "https://github.com/lmmx/cuJSON-rs"
+authors = ["Louis Maddox <louismmx@gmail.com>"]
+keywords = ["json", "jsonl", "parser", "gpu", "cuda"]
 description = "GPU JSON parsing with cuJSON (ASPLOS '26), packaged for Rust and Python"
 
 [workspace.dependencies]
