@@ -15,6 +15,10 @@ Host: NVIDIA GeForce RTX 3090 (sm_86), CUDA runtime 13020, driver 13020, `CUJSON
 - `stage3_parser` (parse_json_lines.cu) and `Parser` (parse_standard_json.cu) return the structural row unchanged when `oc_cnt == 0`, freeing the same buffers as their success paths — the fix is compiled (tier 2) but not yet run on the GPU
 - `verify`'s default sweep adds three bracket-free inputs: JSON Lines `[1]\n\n2\n"x"\n{"a":null}\n` at `chunk_bytes = 1`, and standard documents `42` and ` "s" `; the CPU reference yields tape `[0, 1]` for both scalars and navigates it to `42` / `"s"` (tier 1)
 
+- The third run (after 29d6505 and a2f50c5) still failed the four bracket-free inputs with the same error, and its build printed "All library kernels up-to-date, skipping compilation" — `.watch(["cuda"])` hashes only `.h`/`.cuh`/`.hpp` files under a directory (cudaforge src/hash.rs `hash_paths`), so the guard in the `#include`d upstream `.cu` files was never compiled; commit 29aefa3 passes every file under `cuda/` to `.watch()` explicitly, and an edit to an included `.cu` or `.cpp` file now recompiles all three objects (tier 2, observed in this container)
+- Fourth run (after 29aefa3, which recompiled 3 of 3 kernels): 25/25 checks pass — standard fixture, JSON Lines fixture at one chunk and at 4096-byte chunks, blank and scalar lines at one line per chunk, top-level `42` and ` "s" `, error recovery in both modes, and zero free-memory change over 700 parses (tier 3)
+
 ## Missing
 
-- No GPU run yet of the `oc_cnt == 0` guard or of the three bracket-free `verify` inputs; Tokenize/stage2_tokenizer launches for inputs with zero structural entries (e.g. `42`) have not been examined for zero-size grids
+- No compute-sanitizer memcheck run over the full `verify` sweep, so out-of-bounds device accesses that do not change results are unexamined
+- No GPU other than sm_86 and no CUDA 12.x host has run `verify`; the PTX fallback path is untested
