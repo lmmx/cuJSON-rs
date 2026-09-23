@@ -1,0 +1,21 @@
+[package]
+name = "cujson-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish = false
+
+[lib]
+name = "cujson"
+crate-type = ["cdylib"]
+doc = false
+
+[features]
+cuda = ["cujson/cuda"]
+
+[dependencies]
+cujson = { workspace = true, features = ["serde"] }
+pyo3 = { workspace = true, features = ["abi3-py310", "extension-module"] }

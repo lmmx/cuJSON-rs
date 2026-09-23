@@ -1,2 +1,4 @@
 vendor/
 target/
+__pycache__/
+*.pyc
