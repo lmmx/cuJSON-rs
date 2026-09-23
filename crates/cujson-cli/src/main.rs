@@ -67,29 +67,15 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    // `println!`/`writeln!` to a closed stdout (e.g. `cujson tape F | head`)
-    // either returns an `io::Error` (explicit `write!` call sites, handled
-    // by `ignore_broken_pipe` below) or, for the many `println!` call
-    // sites in this file and in `verify.rs`, panics — `println!` has no
-    // other way to report a write failure. Catching that panic here and
-    // treating "Broken pipe" as a normal exit covers every stdout-writing
-    // command uniformly, without rewriting every `println!` to `writeln!`
-    // plus `?`.
-    match std::panic::catch_unwind(run) {
-        Ok(code) => code,
-        Err(payload) => {
-            let msg = payload
-                .downcast_ref::<String>()
-                .map(|s| s.as_str())
-                .or_else(|| payload.downcast_ref::<&str>().copied())
-                .unwrap_or("");
-            if msg.contains("Broken pipe") {
-                ExitCode::SUCCESS
-            } else {
-                std::panic::resume_unwind(payload)
-            }
-        }
+    // Rust ignores SIGPIPE, so writing to a closed pipe (`cujson tape F | head`)
+    // makes `println!` panic. Restore the default action so the process ends
+    // quietly, as other Unix CLIs do.
+    #[cfg(unix)]
+    // SAFETY: runs first in main, before any other thread exists.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
+    run()
 }
 
 fn run() -> ExitCode {

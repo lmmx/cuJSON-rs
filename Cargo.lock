@@ -284,6 +284,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "cujson",
+ "libc",
  "predicates",
  "serde_json",
  "simd-json",
