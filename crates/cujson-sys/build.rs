@@ -130,7 +130,11 @@ mod build {
     /// "89" or "80,90,ptx90". Otherwise picks CUDA12_DEFAULT/CUDA13_DEFAULT
     /// from the detected toolkit's major version.
     fn resolve_archs(toolkit: &CudaToolkit) -> Vec<ArchEntry> {
-        if let Ok(raw) = env::var("CUJSON_CUDA_ARCHS") {
+        // An empty value (e.g. `CUJSON_CUDA_ARCHS: ""` in a CI matrix) means unset.
+        if let Some(raw) = env::var("CUJSON_CUDA_ARCHS")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+        {
             let mut archs = Vec::new();
             for tok in raw.split(',') {
                 let tok = tok.trim();
