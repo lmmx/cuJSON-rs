@@ -139,3 +139,24 @@ fn invariants_hold_on_generated_inputs() {
         check_invariants(&data, 1 + next(48) as usize);
     }
 }
+
+#[test]
+fn an_input_that_fits_in_one_chunk_is_one_chunk() {
+    let data: Vec<u8> = (0..200)
+        .flat_map(|i| format!("{{\"a\":{i}}}\n").into_bytes())
+        .collect();
+    let n = data.len();
+    // Exactly at and above the size: one chunk, whole buffer, however many lines.
+    assert_eq!(split(&data, n), vec![(0, n)]);
+    assert_eq!(split(&data, n + 1), vec![(0, n)]);
+    assert_eq!(split(&data, usize::MAX), vec![(0, n)]);
+    // One byte below the size: the input has to be split (and stays whole lines).
+    let chunks = split(&data, n - 1);
+    assert!(chunks.len() > 1);
+    assert_eq!(chunks.iter().map(|c| c.1).sum::<usize>(), n);
+    assert!(
+        chunks
+            .iter()
+            .all(|&(start, size)| data[start + size - 1] == b'\n')
+    );
+}
