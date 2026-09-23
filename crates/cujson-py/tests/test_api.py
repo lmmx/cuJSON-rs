@@ -43,7 +43,6 @@ def test_exception_hierarchy():
     assert issubclass(cujson.UnbalancedError, ValueError)
     assert issubclass(cujson.CudaError, cujson.CujsonError)
     assert issubclass(cujson.CudaError, RuntimeError)
-    assert issubclass(cujson.CudaNotCompiledError, cujson.CudaError)
     assert issubclass(cujson.NoDeviceError, cujson.CudaError)
     assert issubclass(cujson.InputError, cujson.CujsonError)
     assert issubclass(cujson.InputError, ValueError)
@@ -58,36 +57,16 @@ def test_every_extension_export_is_reexported():
 
 
 def test_empty_input_raises_input_error():
-    # Checked before any CUDA call, so this holds for CUDA and non-CUDA wheels.
+    # Checked before any CUDA call, so this holds with or without a GPU.
     with pytest.raises(cujson.InputError):
         cujson.parse(b"")
 
 
-def test_cuda_info_on_non_cuda_build_reports_not_compiled():
-    if cujson.CUDA_COMPILED:
-        pytest.skip("this wheel was built with the cuda feature")
-    info = cujson.cuda_info()
-    assert isinstance(info, dict)
-    assert info["compiled"] is False
-
-
-def test_parse_without_cuda_raises_helpful_error():
-    """On a non-CUDA build, parse() must raise CudaNotCompiledError naming
-    which wheel to install instead."""
-    if cujson.CUDA_COMPILED:
-        pytest.skip("this wheel was built with the cuda feature")
-    with pytest.raises(cujson.CudaNotCompiledError) as exc_info:
-        cujson.parse(b'{"a": 1}')
-    message = str(exc_info.value)
-    assert "cujson-cu12" in message
-    assert "cujson-cu13" in message
-
-
 def test_cuda_build_without_gpu_raises_cuda_error():
-    """A CUDA wheel on a machine with no usable driver/device must raise
-    CudaError from every entry point, never a generic CujsonError."""
-    if not cujson.CUDA_COMPILED or GPU_ENABLED:
-        pytest.skip("needs a CUDA wheel on a machine without a usable GPU")
+    """Without a usable driver/device every entry point must raise
+    CudaError, never a generic CujsonError."""
+    if GPU_ENABLED:
+        pytest.skip("needs a machine without a usable GPU")
     for call in (
         cujson.cuda_info,
         lambda: cujson.parse(b'{"a": 1}'),
@@ -123,7 +102,17 @@ def test_gpu_parse_file():
 
 
 @skip_no_gpu
-def test_gpu_cuda_info_reports_compiled_and_devices():
+def test_gpu_cuda_info_reports_devices():
     info = cujson.cuda_info()
-    assert info["compiled"] is True
     assert len(info["devices"]) >= 1
+
+
+@skip_no_gpu
+def test_gpu_parse_rejects_json_lines():
+    text = '{"hello": "world"}\n{"bonjour": "monde"}'
+    with pytest.raises(cujson.InputError, match="parse_lines"):
+        cujson.parse(text)
+    assert cujson.parse_lines(text).lines() == [
+        {"hello": "world"},
+        {"bonjour": "monde"},
+    ]
