@@ -200,6 +200,9 @@ pub fn run(file: Option<PathBuf>, lines: bool, chunk_bytes: Option<usize>) -> Ex
             }
         }
 
+        verify_error_recovery(&mut checks);
+        verify_memory_growth(&mut checks);
+
         println!("---");
         println!(
             "{}/{} checks passed",
@@ -342,6 +345,176 @@ fn verify_lines(checks: &mut Checks, label: &str, bytes: &[u8], chunk_bytes: usi
         &format!("{label}: {idx} lines to_value vs serde_json"),
         true,
         None,
+    );
+}
+
+/// Confirms cuJSON's error paths clean up correctly — the specific
+/// unverified claim task 10's runbook cares about most (lane A's
+/// error-recovery fix): an invalid-UTF-8 or unbalanced parse must not
+/// wedge the device so a valid parse afterwards fails or produces a bad
+/// tape. Tier 3 / unverified beyond this container: real error-path
+/// behaviour (as opposed to the "no driver" `Error::Cuda` this container
+/// always gets first) has only been exercised on a real GPU by task 06's
+/// `crates/cujson/tests/gpu.rs` (`#[ignore = "requires GPU"]` here).
+#[cfg(feature = "cuda")]
+fn verify_error_recovery(checks: &mut Checks) {
+    const INVALID_UTF8: &[u8] = b"{\"a\":\"\xFF\"}";
+    const UNBALANCED: &[u8] = b"{\"a\":[1,2}";
+    const VALID: &[u8] = b"{\"a\":[1,2,3]}";
+    const INVALID_UTF8_LINES: &[u8] = b"{\"a\":\"\xFF\"}\n";
+    const UNBALANCED_LINES: &[u8] = b"{\"a\":[1,2}\n";
+    const VALID_LINES: &[u8] = b"{\"a\":1}\n{\"b\":2}\n";
+
+    fn expect_err<T: std::fmt::Debug>(
+        checks: &mut Checks,
+        label: &str,
+        result: Result<T, cujson::Error>,
+        want: fn(&cujson::Error) -> bool,
+    ) {
+        match result {
+            Err(e) if want(&e) => checks.record(label, true, None),
+            Err(e) => checks.record(label, false, Some(&format!("wrong error: {e:?}"))),
+            Ok(v) => checks.record(label, false, Some(&format!("expected an error, got {v:?}"))),
+        }
+    }
+
+    fn expect_valid_after(checks: &mut Checks, label: &str, bytes: &[u8], mode: cujson::cpu::Mode) {
+        let gpu = match if mode == cujson::cpu::Mode::Standard {
+            cujson::parse(bytes)
+        } else {
+            cujson::parse_lines(bytes, cujson::LinesOptions::default())
+        } {
+            Ok(d) => d,
+            Err(e) => {
+                checks.record(label, false, Some(&format!("GPU parse failed: {e}")));
+                return;
+            }
+        };
+        let cpu = match cujson::cpu::parse(bytes, mode) {
+            Ok(d) => d,
+            Err(e) => {
+                checks.record(label, false, Some(&format!("CPU reference parse failed: {e}")));
+                return;
+            }
+        };
+        match cujson::tape::diff_tapes(bytes, &gpu.tape, &cpu.tape) {
+            None => checks.record(label, true, None),
+            Some(diff) => checks.record(label, false, Some(&diff.to_string())),
+        }
+    }
+
+    expect_err(
+        checks,
+        "error recovery: standard invalid UTF-8 -> InvalidUtf8",
+        cujson::parse(INVALID_UTF8),
+        |e| matches!(e, cujson::Error::InvalidUtf8),
+    );
+    expect_err(
+        checks,
+        "error recovery: standard unbalanced -> Unbalanced",
+        cujson::parse(UNBALANCED),
+        |e| matches!(e, cujson::Error::Unbalanced),
+    );
+    expect_valid_after(
+        checks,
+        "error recovery: standard valid parse after errors",
+        VALID,
+        cujson::cpu::Mode::Standard,
+    );
+
+    expect_err(
+        checks,
+        "error recovery: lines invalid UTF-8 -> InvalidUtf8",
+        cujson::parse_lines(INVALID_UTF8_LINES, cujson::LinesOptions::default()),
+        |e| matches!(e, cujson::Error::InvalidUtf8),
+    );
+    expect_err(
+        checks,
+        "error recovery: lines unbalanced -> Unbalanced",
+        cujson::parse_lines(UNBALANCED_LINES, cujson::LinesOptions::default()),
+        |e| matches!(e, cujson::Error::Unbalanced),
+    );
+    expect_valid_after(
+        checks,
+        "error recovery: lines valid parse after errors",
+        VALID_LINES,
+        cujson::cpu::Mode::Lines,
+    );
+}
+
+/// Heuristic device-memory-growth check — task 10's other unverified
+/// claim (lane A's leak fixes). Runs a warm-up, records free memory,
+/// makes 700 parses (300 valid standard, 300 invalid alternating
+/// UTF-8/unbalanced, 100 lines-mode multi-chunk), records free memory
+/// again. PASS if the drop is under 32 MiB. This is a heuristic, not a
+/// leak proof: CUDA's stream-ordered allocator can hold freed memory in
+/// its pool rather than returning it to the driver, so a `0` delta here
+/// doesn't prove no allocator churn, and a per-parse leak of the size
+/// lane A's fix addressed (~0.3-1 MB) would still clear 32 MiB many times
+/// over across 700 parses and show clearly. Tier 3 / unverified: this
+/// container has no device, so this check has only run against the
+/// no-driver `Err` path here, never against a real GPU's memory counters.
+#[cfg(feature = "cuda")]
+fn verify_memory_growth(checks: &mut Checks) {
+    const INVALID_UTF8: &[u8] = b"{\"a\":\"\xFF\"}";
+    const UNBALANCED: &[u8] = b"{\"a\":[1,2}";
+    const THRESHOLD_BYTES: usize = 32 * 1024 * 1024;
+
+    for _ in 0..5 {
+        let _ = cujson::parse(LARGE_RECORD);
+    }
+
+    let before = match cujson::device_memory() {
+        Ok((free, _total)) => free,
+        Err(e) => {
+            checks.record(
+                "memory growth: device_memory (before)",
+                false,
+                Some(&e.to_string()),
+            );
+            return;
+        }
+    };
+
+    for _ in 0..300 {
+        let _ = cujson::parse(LARGE_RECORD);
+    }
+    for i in 0..300 {
+        if i % 2 == 0 {
+            let _ = cujson::parse(INVALID_UTF8);
+        } else {
+            let _ = cujson::parse(UNBALANCED);
+        }
+    }
+    for _ in 0..100 {
+        let _ = cujson::parse_lines(SMALL_RECORDS, cujson::LinesOptions { chunk_bytes: 4096 });
+    }
+
+    let after = match cujson::device_memory() {
+        Ok((free, _total)) => free,
+        Err(e) => {
+            checks.record(
+                "memory growth: device_memory (after)",
+                false,
+                Some(&e.to_string()),
+            );
+            return;
+        }
+    };
+
+    let delta = before.saturating_sub(after); // free shrank => used grew
+    println!(
+        "memory: before={before} bytes free, after={after} bytes free, delta={delta} bytes \
+         (heuristic — CUDA's stream-ordered allocator pool can hold freed memory)"
+    );
+    let ok = delta < THRESHOLD_BYTES;
+    let detail = format!(
+        "delta={delta} bytes over 700 parses (threshold {THRESHOLD_BYTES} bytes); heuristic, see above"
+    );
+    checks.record(
+        "memory growth over 700 parses stays under 32 MiB (heuristic)",
+        ok,
+        if ok { None } else { Some(&detail) },
     );
 }
 
