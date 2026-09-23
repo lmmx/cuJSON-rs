@@ -63,33 +63,38 @@ def test_empty_input_raises_input_error():
         cujson.parse(b"")
 
 
-def test_cuda_info_reports_a_dict():
+def test_cuda_info_on_non_cuda_build_reports_not_compiled():
+    if cujson.CUDA_COMPILED:
+        pytest.skip("this wheel was built with the cuda feature")
     info = cujson.cuda_info()
     assert isinstance(info, dict)
-    assert "compiled" in info
-    assert isinstance(info["compiled"], bool)
-
-
-@pytest.mark.skipif(GPU_ENABLED, reason="only meaningful for a non-CUDA build")
-def test_cuda_info_not_compiled_reports_false():
-    info = cujson.cuda_info()
-    if info["compiled"] is True:
-        pytest.skip("this wheel was built with the cuda feature")
     assert info["compiled"] is False
 
 
 def test_parse_without_cuda_raises_helpful_error():
     """On a non-CUDA build, parse() must raise CudaNotCompiledError naming
-    which wheel to install instead. On a CUDA build with no driver, this
-    instead raises CudaError/NoDeviceError (tier 3, see gpu tests)."""
-    info = cujson.cuda_info()
-    if info["compiled"]:
+    which wheel to install instead."""
+    if cujson.CUDA_COMPILED:
         pytest.skip("this wheel was built with the cuda feature")
     with pytest.raises(cujson.CudaNotCompiledError) as exc_info:
         cujson.parse(b'{"a": 1}')
     message = str(exc_info.value)
     assert "cujson-cu12" in message
     assert "cujson-cu13" in message
+
+
+def test_cuda_build_without_gpu_raises_cuda_error():
+    """A CUDA wheel on a machine with no usable driver/device must raise
+    CudaError from every entry point, never a generic CujsonError."""
+    if not cujson.CUDA_COMPILED or GPU_ENABLED:
+        pytest.skip("needs a CUDA wheel on a machine without a usable GPU")
+    for call in (
+        cujson.cuda_info,
+        lambda: cujson.parse(b'{"a": 1}'),
+        lambda: cujson.parse_lines(b'{"a": 1}\n'),
+    ):
+        with pytest.raises(cujson.CudaError):
+            call()
 
 
 @skip_no_gpu

@@ -4,6 +4,7 @@ Re-exports the compiled extension module (`cujson._cujson`).
 """
 
 from ._cujson import (
+    CUDA_COMPILED,
     CudaError,
     CudaNotCompiledError,
     CujsonError,
@@ -19,6 +20,7 @@ from ._cujson import (
 )
 
 __all__ = [
+    "CUDA_COMPILED",
     "CudaError",
     "CudaNotCompiledError",
     "CujsonError",

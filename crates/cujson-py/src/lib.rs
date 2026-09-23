@@ -150,5 +150,7 @@ fn _cujson(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(parse_file, module)?)?;
     module.add_function(wrap_pyfunction!(parse_lines, module)?)?;
     module.add_function(wrap_pyfunction!(cuda_info, module)?)?;
+    // How the wheel was built, answerable without touching the driver.
+    module.add("CUDA_COMPILED", cfg!(feature = "cuda"))?;
     Ok(())
 }
