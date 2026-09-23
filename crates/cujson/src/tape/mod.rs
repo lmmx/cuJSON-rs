@@ -14,6 +14,7 @@ mod diff;
 
 pub use document::{Document, Kind, Node};
 pub use error::Error;
+pub(crate) use error::NOT_SINGLE_VALUE;
 pub use storage::{Tape, TapeStorage};
 
 #[cfg(feature = "cuda")]

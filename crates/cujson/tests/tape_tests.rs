@@ -200,3 +200,49 @@ fn navigation_and_depth_ignore_non_opener_pair_pos() {
     assert!(clean.depth() > 1);
     assert_eq!(garbled.root().to_value(), clean.root().to_value());
 }
+
+// ---------------------------------------------------------------------
+// Standard mode accepts exactly one top-level value. cuJSON only checks
+// UTF-8 and bracket balance, so this is enforced by the Document layer.
+
+#[test]
+fn standard_mode_accepts_exactly_one_value() {
+    use cujson::tape::Error;
+    let accepted: &[&[u8]] = &[
+        b"{\"a\":1}",
+        b" [1, 2] \n",
+        b"{}",
+        b"42",
+        b" \"s\" ",
+        b"\"a\\\"b\"",
+        b"true",
+    ];
+    for input in accepted {
+        assert!(
+            cujson::cpu::parse(input, Mode::Standard).is_ok(),
+            "rejected {:?}",
+            String::from_utf8_lossy(input)
+        );
+    }
+    let rejected: &[&[u8]] = &[
+        b"{\"hello\":\"world\"}\n{\"bonjour\":\"monde\"}",
+        b"{\"a\":1} x",
+        b"x {\"a\":1}",
+        b"[1] [2]",
+        b"1 2",
+        b"\"a\" \"b\"",
+        b"1, 2",
+    ];
+    for input in rejected {
+        assert_eq!(
+            cujson::cpu::parse(input, Mode::Standard).err(),
+            Some(Error::NotSingleValue),
+            "accepted {:?}",
+            String::from_utf8_lossy(input)
+        );
+    }
+    // The same JSON Lines input is fine in Lines mode.
+    let lines = b"{\"hello\":\"world\"}\n{\"bonjour\":\"monde\"}";
+    let doc = cujson::cpu::parse(lines, Mode::Lines).unwrap();
+    assert_eq!(doc.lines().count(), 2);
+}

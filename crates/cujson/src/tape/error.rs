@@ -2,6 +2,9 @@
 
 use std::fmt;
 
+pub(crate) const NOT_SINGLE_VALUE: &str =
+    "input is not a single JSON value (for JSON Lines, use parse_lines)";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     EmptyInput,
@@ -14,6 +17,7 @@ pub enum Error {
     KeyNotFound,
     TypeMismatch(&'static str),
     InvalidPointer,
+    NotSingleValue,
 }
 
 impl fmt::Display for Error {
@@ -29,6 +33,7 @@ impl fmt::Display for Error {
             Error::KeyNotFound => write!(f, "object key not found"),
             Error::TypeMismatch(expected) => write!(f, "expected {expected}"),
             Error::InvalidPointer => write!(f, "invalid JSON pointer"),
+            Error::NotSingleValue => write!(f, "{NOT_SINGLE_VALUE}"),
         }
     }
 }

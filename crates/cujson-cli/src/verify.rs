@@ -453,6 +453,12 @@ fn verify_error_recovery(checks: &mut Checks) {
         cujson::parse(UNBALANCED),
         |e| matches!(e, cujson::Error::Unbalanced),
     );
+    expect_err(
+        checks,
+        "error recovery: standard two values -> NotSingleValue",
+        cujson::parse(b"{\"a\":1}\n{\"b\":2}"),
+        |e| matches!(e, cujson::Error::NotSingleValue),
+    );
     expect_valid_after(
         checks,
         "error recovery: standard valid parse after errors",

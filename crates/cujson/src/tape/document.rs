@@ -151,6 +151,43 @@ impl<'a> Document<'a> {
         max
     }
 
+    /// Whether the input holds exactly one top-level JSON value, surrounded
+    /// only by whitespace. cuJSON validates UTF-8 and bracket balance but not
+    /// the JSON grammar, so standard-mode parses check this separately:
+    /// without it `{"a":1}\n{"b":2}` parses as its first object. Reads
+    /// `pair_pos` only at the root opener (`FORMAT.md` §3).
+    pub fn is_single_value(&self) -> bool {
+        let n = self.total();
+        let is_ws = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r');
+        if n <= 2 {
+            // No structural characters, so at most one scalar token.
+            let s = self.input.trim_ascii();
+            return match s.first() {
+                None => false,
+                Some(b'"') => {
+                    let (mut quotes, mut escaped) = (0, false);
+                    for &b in s {
+                        if escaped {
+                            escaped = false;
+                        } else if b == b'\\' {
+                            escaped = true;
+                        } else if b == b'"' {
+                            quotes += 1;
+                        }
+                    }
+                    quotes == 2 && s.last() == Some(&b'"')
+                }
+                Some(_) => !s.iter().any(is_ws),
+            };
+        }
+        if !matches!(self.get_char(1), b'{' | b'[') || self.pair_pos(1) != n - 2 {
+            return false;
+        }
+        let open = self.byte_pos(1) as usize;
+        let close = self.byte_pos(n - 2) as usize;
+        self.input[..open].iter().all(is_ws) && self.input[close + 1..].iter().all(is_ws)
+    }
+
     pub fn root(&'a self) -> Node<'a> {
         self.read_value(0)
     }

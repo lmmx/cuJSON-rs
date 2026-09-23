@@ -115,6 +115,17 @@ fn check_size(len: usize) -> Result<(), Error> {
     Ok(())
 }
 
+/// Standard mode accepts exactly one top-level value; cuJSON itself does not
+/// check this (see [`Document::is_single_value`]).
+#[cfg(feature = "cuda")]
+fn single_value(doc: Document<'_>) -> Result<Document<'_>, Error> {
+    if doc.is_single_value() {
+        Ok(doc)
+    } else {
+        Err(Error::NotSingleValue)
+    }
+}
+
 /// Parse `input` as standard JSON on the GPU. Borrows `input` for the
 /// lifetime of the returned `Document`.
 pub fn parse(input: &[u8]) -> Result<Document<'_>, Error> {
@@ -122,7 +133,7 @@ pub fn parse(input: &[u8]) -> Result<Document<'_>, Error> {
     #[cfg(feature = "cuda")]
     {
         let tape = ffi::parse_standard(input)?;
-        Ok(Document::new(Cow::Borrowed(input), tape))
+        single_value(Document::new(Cow::Borrowed(input), tape))
     }
     #[cfg(not(feature = "cuda"))]
     {
@@ -138,7 +149,7 @@ pub fn parse_owned(input: Vec<u8>) -> Result<Document<'static>, Error> {
     #[cfg(feature = "cuda")]
     {
         let tape = ffi::parse_standard(&input)?;
-        Ok(Document::new(Cow::Owned(input), tape))
+        single_value(Document::new(Cow::Owned(input), tape))
     }
     #[cfg(not(feature = "cuda"))]
     {
@@ -269,7 +280,11 @@ pub mod cpu {
     /// path (`tape/FORMAT.md`).
     pub fn parse(input: &[u8], mode: Mode) -> Result<Document<'_>, Error> {
         let tape = build_tape_cpu(input, mode)?;
-        Ok(Document::new(Cow::Borrowed(input), tape))
+        let doc = Document::new(Cow::Borrowed(input), tape);
+        if mode == Mode::Standard && !doc.is_single_value() {
+            return Err(Error::NotSingleValue);
+        }
+        Ok(doc)
     }
 }
 

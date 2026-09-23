@@ -130,6 +130,7 @@ pub fn to_pyerr(py: Python<'_>, err: cujson::Error) -> PyErr {
             format!("input is {len} bytes, cuJSON's limit is {max} bytes"),
         ),
         E::EmptyInput => err_from(py, &INPUT_ERROR, "empty input".to_string()),
+        E::NotSingleValue => err_from(py, &INPUT_ERROR, err.to_string()),
         E::Cuda { code, message } => {
             err_from(py, &CUDA_ERROR, format!("CUDA error {code}: {message}"))
         }
@@ -155,6 +156,7 @@ pub fn to_pyerr_tape(py: Python<'_>, err: cujson::tape::Error) -> PyErr {
             &UNBALANCED_ERROR,
             "unbalanced JSON structure".to_string(),
         ),
+        E::NotSingleValue => err_from(py, &INPUT_ERROR, err.to_string()),
         other => err_from(py, &CUJSON_ERROR, format!("{other}")),
     }
 }

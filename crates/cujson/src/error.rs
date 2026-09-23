@@ -30,6 +30,10 @@ pub enum Error {
     },
     /// Input was empty (also returned by `cujson_status` `CUJSON_ERR_EMPTY_INPUT`).
     EmptyInput,
+    /// Standard mode only: the input is not exactly one JSON value (e.g.
+    /// JSON Lines passed to [`parse`](crate::parse)). See
+    /// [`Document::is_single_value`](crate::Document::is_single_value).
+    NotSingleValue,
     /// A CUDA runtime call failed: `code` is a raw `cudaError_t` value,
     /// `message` a short human-readable description built on the Rust
     /// side (the C ABI has no `cudaGetErrorString` wrapper).
@@ -58,6 +62,7 @@ impl fmt::Display for Error {
                 write!(f, "input is {len} bytes, cuJSON's limit is {max} bytes")
             }
             Error::EmptyInput => write!(f, "empty input"),
+            Error::NotSingleValue => write!(f, "{}", crate::tape::NOT_SINGLE_VALUE),
             Error::Cuda { code, message } => write!(f, "CUDA error {code}: {message}"),
             Error::Internal => write!(f, "internal error"),
             Error::Io(e) => write!(f, "I/O error: {e}"),
