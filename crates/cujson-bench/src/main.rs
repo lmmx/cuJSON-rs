@@ -51,6 +51,12 @@ enum Cmd {
         /// One JSON object per result instead of a table
         #[arg(long)]
         json: bool,
+        /// Give the cujson-* engines their input in pinned memory (copied once, untimed)
+        #[arg(long)]
+        pinned_input: bool,
+        /// Threads parsing on the GPU at once in cujson-pipe
+        #[arg(long, default_value_t = 1)]
+        gpu_threads: usize,
     },
     /// Parse the same batch repeatedly, printing RSS and free GPU memory per iteration
     Leak {
@@ -116,7 +122,19 @@ fn main() {
             reps,
             warmup,
             json,
-        } => bench(&input, &engines, &levels, tape, reps, warmup, json),
+            pinned_input,
+            gpu_threads,
+        } => bench(
+            &input,
+            &engines,
+            &levels,
+            tape,
+            reps,
+            warmup,
+            json,
+            pinned_input,
+            gpu_threads,
+        ),
         Cmd::Verify { input, rows } => verify(&input, rows),
         Cmd::Leak {
             input,
@@ -126,6 +144,7 @@ fn main() {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn bench(
     input: &Input,
     engines: &[Engine],
@@ -134,8 +153,20 @@ fn bench(
     reps: usize,
     warmup: usize,
     json: bool,
+    pinned_input: bool,
+    gpu_threads: usize,
 ) {
-    let corpus = load(input, None);
+    let mut corpus = load(input, None);
+    if pinned_input {
+        for b in &mut corpus.batches {
+            b.pinned = Some(
+                cujson::PinnedBuffer::from_slice(&b.bytes).unwrap_or_else(|e| {
+                    eprintln!("pinned input: {e}");
+                    std::process::exit(2)
+                }),
+            );
+        }
+    }
     let (rows, bytes) = (corpus.rows(), corpus.bytes());
     let gb = bytes as f64 / 1e9;
     eprintln!(
@@ -154,6 +185,17 @@ fn bench(
     );
     let baseline_kb = proc_kb("VmRSS:").unwrap_or(0);
     let mut reference: Vec<(Level, u64, u64)> = vec![];
+    if levels.contains(&Level::Walk) {
+        // Every walk result is checked against simd-json's, even when it is the only engine run.
+        let (mut r, mut h) = (0, 0u64);
+        for b in &corpus.batches {
+            let run =
+                run_batch(Engine::SimdPar, Level::Walk, tape, b).expect("simd-json reference");
+            r += run.rows;
+            h = h.wrapping_add(run.hash);
+        }
+        reference.push((Level::Walk, r, h));
+    }
 
     for &engine in engines {
         if engine.is_cujson()
@@ -177,7 +219,7 @@ fn bench(
                 let (mut r, mut h) = (0, 0u64);
                 let mut total = Duration::ZERO;
                 let results: Vec<Result<engines::Run, String>> = if engine == Engine::CujsonPipe {
-                    vec![run_pipeline(&corpus.batches, tape)]
+                    vec![run_pipeline(&corpus.batches, tape, gpu_threads)]
                 } else {
                     corpus
                         .batches

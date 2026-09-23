@@ -2,6 +2,7 @@
 #include "cujson_types.h"
 #include "cujson_error.h"
 #include "../pinned_cache.h"
+#include "../async_alloc.h"
 
 
 namespace cujson_lines {
@@ -865,7 +866,7 @@ inline uint8_t * stage2_tokenizer(  uint8_t* block_GPU,
     uint32_t* quote_cnt = general_ptr;
 
     // Step 3b:
-    thrust::exclusive_scan(thrust::cuda::par, quote_cnt, quote_cnt + (total_padded_32), quote_cnt);
+    thrust::exclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), quote_cnt, quote_cnt + (total_padded_32), quote_cnt);
     uint32_t* acc_quote_cnt = quote_cnt;
 
     // Step 3c:
@@ -885,12 +886,12 @@ inline uint8_t * stage2_tokenizer(  uint8_t* block_GPU,
 
  
     // Step 4b:
-    thrust::inclusive_scan(thrust::cuda::par, structural_cnt, structural_cnt + total_padded_32, structural_cnt);
+    thrust::inclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), structural_cnt, structural_cnt + total_padded_32, structural_cnt);
     cudaMemcpyAsync(&last_index_tokens, structural_cnt + total_padded_32 - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost);
     uint32_t* acc_structural_cnt = structural_cnt;
 
     // Step 4c:
-    thrust::inclusive_scan(thrust::cuda::par, open_close_cnt, open_close_cnt + total_padded_32, open_close_cnt);
+    thrust::inclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), open_close_cnt, open_close_cnt + total_padded_32, open_close_cnt);
     cudaMemcpyAsync(&last_index_tokens_open_close, open_close_cnt + total_padded_32 - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost);
     uint32_t* acc_open_close_cnt = open_close_cnt;
 
@@ -1046,16 +1047,16 @@ int32_t* stage3_parser(uint8_t* open_close_bitmap, int32_t** open_close_index_d,
 
     uint32_t* depth = oc_1; // output 
     // // _______________STEP_1__(b)_________________
-    thrust::inclusive_scan(thrust::cuda::par,  (uint8_t*) depth,  ((uint8_t*) depth) + oc_cnt,  (uint8_t*) depth); // on depth
+    thrust::inclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread),  (uint8_t*) depth,  ((uint8_t*) depth) + oc_cnt,  (uint8_t*) depth); // on depth
 
     // // _______________STEP_2__(a)_________________
-    thrust::transform_if(thrust::cuda::par, (uint8_t*) depth, ((uint8_t*) depth) + oc_cnt, open_close_bitmap, (uint8_t*) depth, decrease(), is_opening());
+    thrust::transform_if(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), (uint8_t*) depth, ((uint8_t*) depth) + oc_cnt, open_close_bitmap, (uint8_t*) depth, decrease(), is_opening());
 
     // // _______________STEP_3__(b)_________________
     // Use zip iterator to combine oc_idx and open_close_bitmap
     auto zipped_begin = thrust::make_zip_iterator(thrust::make_tuple(oc_idx, open_close_bitmap));
     // Sorting based on depth using a single stable_sort_by_key
-    thrust::stable_sort_by_key(thrust::cuda::par, (uint8_t*)depth, ((uint8_t*)depth) + oc_cnt, zipped_begin);
+    thrust::stable_sort_by_key(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), (uint8_t*)depth, ((uint8_t*)depth) + oc_cnt, zipped_begin);
 
     char* pair_oc = (char *) open_close_bitmap;
     uint32_t* pair_idx = oc_idx;

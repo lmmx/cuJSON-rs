@@ -4,7 +4,7 @@
 //! (`docs/plan/10-gpu-validation-runbook.md` step 4).
 //!
 //! Every parse here goes through the public `cujson::parse`/`parse_lines`
-//! API, which serializes on `ffi::GPU_LOCK` internally
+//! API, which takes a slot from `ffi`'s concurrency limit internally
 //! (`crates/cujson/src/ffi.rs`) — no direct `cujson_sys` calls, per
 //! `docs/plan/README.md`'s "Concurrency" row.
 #![cfg(all(feature = "cuda", feature = "cpu-reference", feature = "serde"))]
@@ -277,4 +277,34 @@ fn pinned_buffer_reuse_keeps_tapes_correct() {
             cujson::trim_pinned_cache();
         }
     }
+}
+
+/// Parses from several threads at once must each equal the CPU reference.
+#[test]
+#[ignore = "requires GPU"]
+fn concurrent_parses_match_cpu_reference() {
+    let _serial = serial();
+    let std_bytes = read_fixture("twitter_sample_large_record.json");
+    let lines_bytes = read_fixture("twitter_sample_small_records.json");
+    let std_cpu = cpu::parse(&std_bytes, Mode::Standard).unwrap();
+    let lines_cpu = cpu::parse(&lines_bytes, Mode::Lines).unwrap();
+    cujson::set_max_concurrent_parses(4);
+    std::thread::scope(|s| {
+        for t in 0..4 {
+            let (std_bytes, lines_bytes) = (&std_bytes, &lines_bytes);
+            let (std_cpu, lines_cpu) = (&std_cpu, &lines_cpu);
+            s.spawn(move || {
+                for round in 0..20 {
+                    let a = cujson::parse(std_bytes).expect("GPU parse");
+                    let b = cujson::parse_lines(lines_bytes, cujson::LinesOptions::default())
+                        .expect("GPU parse_lines");
+                    let da = diff_tapes(std_bytes, &a.tape, &std_cpu.tape);
+                    assert!(da.is_none(), "thread {t} round {round}: {}", da.unwrap());
+                    let db = diff_tapes(lines_bytes, &b.tape, &lines_cpu.tape);
+                    assert!(db.is_none(), "thread {t} round {round}: {}", db.unwrap());
+                }
+            });
+        }
+    });
+    cujson::set_max_concurrent_parses(1);
 }

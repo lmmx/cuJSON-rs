@@ -8,6 +8,15 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 pub struct Batch {
     pub bytes: Vec<u8>,
     pub rows: usize,
+    /// A copy of `bytes` in pinned memory, when `--pinned-input` is set.
+    pub pinned: Option<cujson::PinnedBuffer>,
+}
+
+impl Batch {
+    /// What the cuJSON engines parse: the pinned copy if there is one.
+    pub fn input(&self) -> &[u8] {
+        self.pinned.as_deref().unwrap_or(&self.bytes)
+    }
 }
 
 #[derive(Default)]
@@ -54,6 +63,7 @@ pub fn load(
     let mut cur = Batch {
         bytes: Vec::new(),
         rows: 0,
+        pinned: None,
     };
     let push = |value: Option<&str>, corpus: &mut Corpus, cur: &mut Batch| {
         corpus.file_rows += 1;
@@ -75,6 +85,7 @@ pub fn load(
                 Batch {
                     bytes: Vec::new(),
                     rows: 0,
+                    pinned: None,
                 },
             ));
         }

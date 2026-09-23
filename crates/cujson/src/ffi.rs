@@ -2,11 +2,12 @@
 //!
 //! cuJSON uses the default CUDA stream and keeps no per-call state
 //! (`docs/plan/README.md`'s "Concurrency" row), so every entry point here
-//! serializes on one process-wide `Mutex` — never call the raw
+//! takes one of a process-wide set of slots (one by default) — never call the raw
 //! `cujson_sys` functions directly from elsewhere in this crate.
 
 use std::ffi::CStr;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex, OnceLock};
 
 use cujson_sys as sys;
 
@@ -14,12 +15,38 @@ use crate::error::Error;
 use crate::tape::{Tape, tape_from_ffi};
 use crate::{CudaInfo, DeviceInfo};
 
-static GPU_LOCK: Mutex<()> = Mutex::new(());
+/// Parses admitted at once. The default of 1 serialises every FFI call; a
+/// higher limit lets parses from different threads overlap on the GPU, each
+/// on its own per-thread default stream.
+static MAX_CONCURRENT: AtomicUsize = AtomicUsize::new(1);
+static IN_FLIGHT: Mutex<usize> = Mutex::new(0);
+static SLOT_FREED: Condvar = Condvar::new();
 
-fn lock() -> MutexGuard<'static, ()> {
-    GPU_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+pub(crate) fn set_max_concurrent(n: usize) {
+    MAX_CONCURRENT.store(n.max(1), Ordering::Relaxed);
+    // `n` tapes being built, one queued and one being read by a consumer.
+    unsafe { sys::cujson_pinned_cache_set_limit(n.max(1) + 2) };
+    SLOT_FREED.notify_all();
+}
+
+/// Holds one of the `MAX_CONCURRENT` slots until dropped.
+pub(crate) struct GpuGuard;
+
+impl Drop for GpuGuard {
+    fn drop(&mut self) {
+        let mut n = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+        *n -= 1;
+        SLOT_FREED.notify_one();
+    }
+}
+
+fn lock() -> GpuGuard {
+    let mut n = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+    while *n >= MAX_CONCURRENT.load(Ordering::Relaxed) {
+        n = SLOT_FREED.wait(n).unwrap_or_else(|e| e.into_inner());
+    }
+    *n += 1;
+    GpuGuard
 }
 
 /// `cudaGetErrorName`/`cudaGetErrorString` for a raw `cudaError_t`, e.g.

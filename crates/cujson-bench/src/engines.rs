@@ -134,10 +134,9 @@ fn run_simd(engine: Engine, level: Level, batch: &Batch) -> Run {
 fn run_cujson(engine: Engine, level: Level, tape: Tape, batch: &Batch) -> Result<Run, String> {
     let t = Instant::now();
     let doc = match tape {
-        Tape::Cpu => {
-            cujson::cpu::parse(&batch.bytes, cujson::cpu::Mode::Lines).map_err(|e| e.to_string())?
-        }
-        Tape::Gpu => cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
+        Tape::Cpu => cujson::cpu::parse(batch.input(), cujson::cpu::Mode::Lines)
+            .map_err(|e| e.to_string())?,
+        Tape::Gpu => cujson::parse_lines(batch.input(), cujson::LinesOptions::default())
             .map_err(|e| e.to_string())?,
     };
     let parse = t.elapsed();
@@ -197,30 +196,43 @@ fn run_cujson(engine: Engine, level: Level, tape: Tape, batch: &Batch) -> Result
 fn parse_batch(batch: &Batch, tape: Tape) -> Result<cujson::Document<'_>, String> {
     match tape {
         Tape::Cpu => {
-            cujson::cpu::parse(&batch.bytes, cujson::cpu::Mode::Lines).map_err(|e| e.to_string())
+            cujson::cpu::parse(batch.input(), cujson::cpu::Mode::Lines).map_err(|e| e.to_string())
         }
-        Tape::Gpu => cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
+        Tape::Gpu => cujson::parse_lines(batch.input(), cujson::LinesOptions::default())
             .map_err(|e| e.to_string()),
     }
 }
 
-/// Parse batch N+1 on one thread while batch N is walked in rayon.
-pub fn run_pipeline(batches: &[Batch], tape: Tape) -> Result<Run, String> {
-    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+/// Parse batches on `gpu_threads` threads while the previous ones are walked
+/// in rayon. With more than one GPU thread, parses overlap on the GPU.
+pub fn run_pipeline(batches: &[Batch], tape: Tape, gpu_threads: usize) -> Result<Run, String> {
+    let gpu_threads = gpu_threads.max(1);
+    cujson::set_max_concurrent_parses(gpu_threads);
+    let (tx, rx) = std::sync::mpsc::sync_channel(gpu_threads);
+    let next = std::sync::atomic::AtomicUsize::new(0);
     let start = Instant::now();
-    std::thread::scope(|s| {
-        let producer = s.spawn(move || -> Result<Duration, String> {
-            let mut busy = Duration::ZERO;
-            for b in batches {
-                let t = Instant::now();
-                let doc = parse_batch(b, tape)?;
-                busy += t.elapsed();
-                if tx.send(doc).is_err() {
-                    break;
-                }
-            }
-            Ok(busy)
-        });
+    let result = std::thread::scope(|s| {
+        let producers: Vec<_> = (0..gpu_threads)
+            .map(|_| {
+                let tx = tx.clone();
+                let next = &next;
+                s.spawn(move || -> Result<Duration, String> {
+                    let mut busy = Duration::ZERO;
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(b) = batches.get(i) else { break };
+                        let t = Instant::now();
+                        let doc = parse_batch(b, tape)?;
+                        busy += t.elapsed();
+                        if tx.send(doc).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(busy)
+                })
+            })
+            .collect();
+        drop(tx);
         let (mut rows, mut hash, mut walk_busy) = (0u64, 0u64, Duration::ZERO);
         for doc in rx {
             let t = Instant::now();
@@ -238,12 +250,17 @@ pub fn run_pipeline(batches: &[Batch], tape: Tape) -> Result<Run, String> {
             drop(doc);
             walk_busy += t.elapsed();
         }
-        let parse_busy = producer.join().expect("producer thread")?;
+        let mut parse_busy = Duration::ZERO;
+        for p in producers {
+            parse_busy += p.join().expect("producer thread")?;
+        }
         Ok(Run {
             wall: Some(start.elapsed()),
             phases: vec![("parse busy", parse_busy), ("walk busy", walk_busy)],
             rows,
             hash,
         })
-    })
+    });
+    cujson::set_max_concurrent_parses(1);
+    result
 }

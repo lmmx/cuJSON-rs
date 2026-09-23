@@ -70,7 +70,7 @@ extern "C" cujson_status cujson_parse_lines(const uint8_t* data, size_t size, si
     }
 
     cudaError_t cerr = cudaGetLastError();
-    if (cerr == cudaSuccess) cerr = cudaDeviceSynchronize();
+    if (cerr == cudaSuccess) cerr = cudaStreamSynchronize(0);  // this thread's stream, so parses on other threads keep running
     if (cerr != cudaSuccess) {
         if (result.structural != nullptr) cujson_pinned_free(result.structural);
         out->cuda_error = static_cast<int32_t>(cerr);

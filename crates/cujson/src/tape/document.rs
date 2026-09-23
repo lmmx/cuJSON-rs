@@ -292,19 +292,34 @@ fn object_pairs<'a>(
     })
 }
 
+const HEX: [u8; 256] = {
+    let mut t = [0xFFu8; 256];
+    let mut i = 0;
+    while i < 10 {
+        t[b'0' as usize + i] = i as u8;
+        i += 1;
+    }
+    let mut i = 0;
+    while i < 6 {
+        t[b'a' as usize + i] = 10 + i as u8;
+        t[b'A' as usize + i] = 10 + i as u8;
+        i += 1;
+    }
+    t
+};
+
 fn parse_hex4(bytes: &[u8], start: usize) -> Result<u32, Error> {
     let s = bytes.get(start..start + 4).ok_or(Error::InvalidEscape)?;
-    let mut v = 0u32;
-    for &b in s {
-        let d = match b {
-            b'0'..=b'9' => b - b'0',
-            b'a'..=b'f' => b - b'a' + 10,
-            b'A'..=b'F' => b - b'A' + 10,
-            _ => return Err(Error::InvalidEscape),
-        };
-        v = (v << 4) | u32::from(d);
+    let (a, b, c, d) = (
+        HEX[s[0] as usize],
+        HEX[s[1] as usize],
+        HEX[s[2] as usize],
+        HEX[s[3] as usize],
+    );
+    if (a | b | c | d) > 0x0F {
+        return Err(Error::InvalidEscape);
     }
-    Ok(v)
+    Ok((u32::from(a) << 12) | (u32::from(b) << 8) | (u32::from(c) << 4) | u32::from(d))
 }
 
 pub(super) fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
@@ -314,20 +329,30 @@ pub(super) fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
             .map_err(|_| Error::InvalidUtf8);
     }
     let mut out = String::with_capacity(bytes.len());
-    unescape_into(bytes, &mut out)?;
+    unescape_into(bytes, &mut out, false)?;
     Ok(Cow::Owned(out))
 }
 
-/// Append the unescaped text of `bytes` to `out`.
-pub(super) fn unescape_into(bytes: &[u8], out: &mut String) -> Result<(), Error> {
+/// Append the unescaped text of `bytes` to `out`. `validated` promises that
+/// `bytes` lies inside a region already checked to be valid UTF-8 and that
+/// both of its ends are next to ASCII bytes, so runs between backslashes
+/// need no second check.
+pub(super) fn unescape_into(bytes: &[u8], out: &mut String, validated: bool) -> Result<(), Error> {
+    out.reserve(bytes.len());
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] != b'\\' {
-            let start = i;
-            while i < bytes.len() && bytes[i] != b'\\' {
-                i += 1;
+            let rest = &bytes[i..];
+            let n = rest.iter().position(|&b| b == b'\\').unwrap_or(rest.len());
+            let run = &rest[..n];
+            if validated {
+                // SAFETY: `run` is bounded by ASCII bytes (a backslash, or the
+                // ASCII bytes next to `bytes`) inside a valid UTF-8 region.
+                out.push_str(unsafe { std::str::from_utf8_unchecked(run) });
+            } else {
+                out.push_str(std::str::from_utf8(run).map_err(|_| Error::InvalidUtf8)?);
             }
-            out.push_str(std::str::from_utf8(&bytes[start..i]).map_err(|_| Error::InvalidUtf8)?);
+            i += n;
             continue;
         }
         let e = *bytes.get(i + 1).ok_or(Error::InvalidEscape)?;

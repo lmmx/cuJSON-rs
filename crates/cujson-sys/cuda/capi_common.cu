@@ -8,25 +8,45 @@
 #include <cstdio>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace {
 std::mutex g_pinned_mu;
 std::unordered_map<void*, size_t> g_pinned_cap;  // capacity of every live or cached buffer
-void* g_pinned_cached = nullptr;
-size_t g_pinned_cached_cap = 0;
+std::vector<std::pair<void*, size_t>> g_pinned_cache;  // free buffers kept for reuse
+size_t g_pinned_cache_limit = 1;
+
+// Remove and return the smallest cached buffer; caller holds the lock.
+std::pair<void*, size_t> pop_smallest_locked() {
+    size_t k = 0;
+    for (size_t i = 1; i < g_pinned_cache.size(); i++) {
+        if (g_pinned_cache[i].second < g_pinned_cache[k].second) k = i;
+    }
+    auto out = g_pinned_cache[k];
+    g_pinned_cache.erase(g_pinned_cache.begin() + k);
+    g_pinned_cap.erase(out.first);
+    return out;
+}
 }  // namespace
 
 extern "C" void* cujson_pinned_alloc(size_t bytes) {
     {
         std::lock_guard<std::mutex> lock(g_pinned_mu);
-        // Reuse only a buffer of similar size, so a small parse does not
-        // pin a large one.
-        if (g_pinned_cached != nullptr && g_pinned_cached_cap >= bytes &&
-            g_pinned_cached_cap <= 2 * bytes) {
-            void* p = g_pinned_cached;
-            g_pinned_cached = nullptr;
-            g_pinned_cached_cap = 0;
-            return p;
+        // Reuse the smallest cached buffer that fits, but only one of similar
+        // size, so a small parse does not pin a large one.
+        int best = -1;
+        for (size_t i = 0; i < g_pinned_cache.size(); i++) {
+            size_t cap = g_pinned_cache[i].second;
+            if (cap >= bytes && cap <= 2 * bytes &&
+                (best < 0 || cap < g_pinned_cache[best].second)) {
+                best = static_cast<int>(i);
+            }
+        }
+        if (best >= 0) {
+            void* p = g_pinned_cache[best].first;
+            g_pinned_cache.erase(g_pinned_cache.begin() + best);
+            return p;  // stays in g_pinned_cap with its real capacity
         }
     }
     void* p = nullptr;
@@ -42,31 +62,57 @@ extern "C" void cujson_pinned_free(void* p) {
     {
         std::lock_guard<std::mutex> lock(g_pinned_mu);
         auto it = g_pinned_cap.find(p);
-        if (it == g_pinned_cap.end() || p == g_pinned_cached) {
-            release = (p == g_pinned_cached) ? nullptr : p;
-        } else if (g_pinned_cached == nullptr || it->second > g_pinned_cached_cap) {
-            release = g_pinned_cached;
-            if (release != nullptr) g_pinned_cap.erase(release);
-            g_pinned_cached = p;
-            g_pinned_cached_cap = it->second;
-        } else {
-            g_pinned_cap.erase(it);
+        bool cached = false;
+        for (auto& c : g_pinned_cache) cached |= (c.first == p);
+        if (cached) return;  // double free
+        if (it == g_pinned_cap.end()) {
             release = p;
+        } else if (g_pinned_cache.size() < g_pinned_cache_limit) {
+            g_pinned_cache.emplace_back(p, it->second);
+        } else {
+            size_t cap = it->second;
+            size_t smallest = g_pinned_cache.empty() ? 0 : g_pinned_cache[0].second;
+            for (auto& c : g_pinned_cache) smallest = c.second < smallest ? c.second : smallest;
+            if (!g_pinned_cache.empty() && smallest < cap) {
+                release = pop_smallest_locked().first;
+                g_pinned_cache.emplace_back(p, cap);
+            } else {
+                g_pinned_cap.erase(it);
+                release = p;
+            }
         }
     }
     if (release != nullptr) cudaFreeHost(release);
 }
 
-extern "C" void cujson_pinned_cache_trim(void) {
-    void* release = nullptr;
+extern "C" void cujson_pinned_cache_set_limit(size_t buffers) {
+    std::vector<void*> release;
     {
         std::lock_guard<std::mutex> lock(g_pinned_mu);
-        release = g_pinned_cached;
-        if (release != nullptr) g_pinned_cap.erase(release);
-        g_pinned_cached = nullptr;
-        g_pinned_cached_cap = 0;
+        g_pinned_cache_limit = buffers < 1 ? 1 : buffers;
+        while (g_pinned_cache.size() > g_pinned_cache_limit) {
+            release.push_back(pop_smallest_locked().first);
+        }
     }
-    if (release != nullptr) cudaFreeHost(release);
+    for (void* p : release) cudaFreeHost(p);
+}
+
+extern "C" void cujson_pinned_cache_trim(void) {
+    std::vector<void*> release;
+    {
+        std::lock_guard<std::mutex> lock(g_pinned_mu);
+        while (!g_pinned_cache.empty()) release.push_back(pop_smallest_locked().first);
+    }
+    for (void* p : release) cudaFreeHost(p);
+}
+
+extern "C" void* cujson_host_alloc(size_t bytes) {
+    void* p = nullptr;
+    return cudaMallocHost(&p, bytes) == cudaSuccess ? p : nullptr;
+}
+
+extern "C" void cujson_host_free(void* p) {
+    if (p != nullptr) cudaFreeHost(p);
 }
 
 extern "C" void cujson_tape_free(cujson_tape* tape) {

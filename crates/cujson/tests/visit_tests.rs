@@ -140,3 +140,36 @@ fn mismatched_tape_and_input_does_not_panic() {
     let doc = Document::new(Cow::Borrowed(&b"[1]]"[..]), tape);
     let _ = doc.visit(&mut Recorder::default());
 }
+
+#[test]
+fn invalid_utf8_in_a_string_is_an_error() {
+    let good = "{\"a\":\"\u{e9}x\"}".as_bytes().to_vec();
+    let tape = build_tape_cpu(&good, Mode::Standard).unwrap();
+    let mut bad = good.clone();
+    let at = bad.iter().position(|&b| b == 0xC3).unwrap();
+    bad[at + 1] = b'('; // 0xC3 0x28 is not a valid sequence
+    let doc = Document::new(Cow::Owned(bad), tape);
+    assert_eq!(
+        doc.visit(&mut Recorder::default()),
+        Err(cujson::tape::Error::InvalidUtf8)
+    );
+}
+
+#[test]
+#[allow(irrefutable_let_patterns)] // `Pinned` exists only with the `cuda` feature
+fn corrupt_tape_offsets_are_an_error_not_a_read_outside_the_region() {
+    let input = br#"{"a":"xyz","b":[1,2]}"#;
+    for damage in 0..8 {
+        let mut tape = build_tape_cpu(input, Mode::Standard).unwrap();
+        let cujson::tape::TapeStorage::Owned(s) = &mut tape.structural else {
+            unreachable!()
+        };
+        let n = s.len();
+        s[1 + damage % (n - 2)] = if damage % 2 == 0 { 1 } else { 1000 };
+        let doc = Document::new(Cow::Borrowed(&input[..]), tape);
+        let _ = doc.visit(&mut Recorder::default());
+        for r in doc.split_lines(3) {
+            let _ = doc.visit_range(r, &mut Recorder::default());
+        }
+    }
+}

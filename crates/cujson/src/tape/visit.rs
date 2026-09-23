@@ -22,15 +22,21 @@ pub trait Visitor {
     fn null(&mut self) {}
 }
 
+/// `raw` must lie inside a region the caller has checked to be valid UTF-8.
 fn unquote<'a>(raw: &'a [u8], scratch: &'a mut String) -> Result<&'a str, Error> {
     let [b'"', inner @ .., b'"'] = raw else {
         return Err(Error::TypeMismatch("string"));
     };
-    if !inner.contains(&b'\\') {
-        return std::str::from_utf8(inner).map_err(|_| Error::InvalidUtf8);
+    // `any` measured faster than `contains` on these short strings.
+    #[allow(clippy::manual_contains)]
+    let plain = !inner.iter().any(|&b| b == b'\\');
+    if plain {
+        // SAFETY: `inner` sits between two ASCII quote bytes of a region
+        // checked to be valid UTF-8, so both of its ends are char boundaries.
+        return Ok(unsafe { std::str::from_utf8_unchecked(inner) });
     }
     scratch.clear();
-    unescape_into(inner, scratch)?;
+    unescape_into(inner, scratch, true)?;
     Ok(scratch.as_str())
 }
 
@@ -59,6 +65,7 @@ impl Document<'_> {
         if n <= 2 {
             let raw = self.input.trim_ascii();
             let mut scratch = String::new();
+            std::str::from_utf8(&self.input).map_err(|_| Error::InvalidUtf8)?;
             return if raw.is_empty() {
                 Ok(())
             } else {
@@ -109,10 +116,25 @@ impl Document<'_> {
         } else {
             structural[range.start - 1] as usize
         };
+        // Check the bytes this range reads once, so keys and strings need no
+        // per-value check (see `unquote`).
+        let region_end = if range.end == n - 1 {
+            input.len()
+        } else {
+            (structural[range.end - 1] as usize).min(input.len())
+        };
+        if prev > region_end {
+            return Err(Error::IndexOutOfRange);
+        }
+        std::str::from_utf8(&input[prev..region_end]).map_err(|_| Error::InvalidUtf8)?;
         let mut depth = 0usize;
         for &p in &structural[range.clone()] {
             let pos = (p - 1) as usize;
-            let raw = input[prev..pos.max(prev)].trim_ascii();
+            // Every span must stay inside the region validated above.
+            if pos < prev || pos >= region_end.max(1) {
+                return Err(Error::IndexOutOfRange);
+            }
+            let raw = input[prev..pos].trim_ascii();
             match input[pos] {
                 b'{' => {
                     v.begin_object();

@@ -2,6 +2,7 @@
 #include "cujson_types.h"
 #include "cujson_error.h"
 #include "../pinned_cache.h"
+#include "../async_alloc.h"
 
 
 namespace cujson_std {
@@ -1162,8 +1163,8 @@ inline uint8_t * Tokenize(  uint8_t* block_GPU,
     
     // Step 3b
     // cudaEventRecord(start, 0);
-    // thrust::exclusive_scan(thrust::cuda::par, (uint64_t*) total_one_GPU, ( (uint64_t*) total_one_GPU ) + (total_padded_64), (uint64_t*) total_one_GPU);
-    thrust::exclusive_scan(thrust::cuda::par, total_one_GPU, total_one_GPU + (total_padded_32), total_one_GPU);
+    // thrust::exclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), (uint64_t*) total_one_GPU, ( (uint64_t*) total_one_GPU ) + (total_padded_64), (uint64_t*) total_one_GPU);
+    thrust::exclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), total_one_GPU, total_one_GPU + (total_padded_32), total_one_GPU);
     // cudaEventRecord(stop, 0);
     // cudaEventSynchronize(stop);
     // cudaEventElapsedTime(&milliseconds, start, stop);
@@ -1245,7 +1246,7 @@ inline uint8_t * Tokenize(  uint8_t* block_GPU,
 
     // Step 5b
     // cudaEventRecord(start, 0);
-    thrust::inclusive_scan(thrust::cuda::par, set_bit_count, set_bit_count + total_padded_32, set_bit_count);
+    thrust::inclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), set_bit_count, set_bit_count + total_padded_32, set_bit_count);
     cudaMemcpyAsync(&last_index_tokens, set_bit_count + total_padded_32 - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost);
     // cudaEventRecord(stop, 0);
     // cudaEventSynchronize(stop);
@@ -1254,7 +1255,7 @@ inline uint8_t * Tokenize(  uint8_t* block_GPU,
 
     // Step 5c
     // cudaEventRecord(start, 0);
-    thrust::inclusive_scan(thrust::cuda::par, set_bit_count_open_close, set_bit_count_open_close + total_padded_32, set_bit_count_open_close);
+    thrust::inclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), set_bit_count_open_close, set_bit_count_open_close + total_padded_32, set_bit_count_open_close);
     cudaMemcpyAsync(&last_index_tokens_open_close, set_bit_count_open_close + total_padded_32 - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost);
     // cudaEventRecord(stop, 0);
     // cudaEventSynchronize(stop);
@@ -1551,16 +1552,16 @@ int32_t* Parser(uint8_t* open_close_GPU, int32_t** open_close_index_d,  int32_t*
 
     uint32_t* depth = oc_1; // output 
     // // _______________STEP_1__(b)_________________
-    thrust::inclusive_scan(thrust::cuda::par,  (uint8_t*) depth,  ((uint8_t*) depth) + oc_cnt,  (uint8_t*) depth); // on depth
+    thrust::inclusive_scan(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread),  (uint8_t*) depth,  ((uint8_t*) depth) + oc_cnt,  (uint8_t*) depth); // on depth
 
     // // _______________STEP_2__(a)_________________
-    thrust::transform_if(thrust::cuda::par, (uint8_t*) depth, ((uint8_t*) depth) + oc_cnt, open_close_GPU, (uint8_t*) depth, decrease(), is_opening());
+    thrust::transform_if(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), (uint8_t*) depth, ((uint8_t*) depth) + oc_cnt, open_close_GPU, (uint8_t*) depth, decrease(), is_opening());
 
     // // _______________STEP_3__(b)_________________
 
     // Use zip iterator to combine oc_idx and open_close_GPU
     auto zipped_begin = thrust::make_zip_iterator(thrust::make_tuple(oc_idx, open_close_GPU));
-    thrust::stable_sort_by_key(thrust::cuda::par, (uint8_t*)depth, ((uint8_t*)depth) + oc_cnt, zipped_begin);
+    thrust::stable_sort_by_key(thrust::cuda::par(g_cujson_talloc).on(cudaStreamPerThread), (uint8_t*)depth, ((uint8_t*)depth) + oc_cnt, zipped_begin);
 
     char* pair_oc = (char *) open_close_GPU;
     uint32_t* pair_idx = oc_idx;
