@@ -6,7 +6,7 @@
 //! `cujson_sys` functions directly from elsewhere in this crate.
 
 use std::ffi::CStr;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use cujson_sys as sys;
 
@@ -20,6 +20,21 @@ fn lock() -> MutexGuard<'static, ()> {
     GPU_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// `cudaGetErrorName`/`cudaGetErrorString` for a raw `cudaError_t`, e.g.
+/// `"cudaErrorInsufficientDriver: CUDA driver version is insufficient for
+/// CUDA runtime version"` — richer than `format!("cudaError {code}")`, and
+/// what the CLI's `info`/`verify` hints (task 07) are built from.
+fn cuda_error_string(code: i32) -> String {
+    unsafe {
+        let ptr = sys::cujson_cuda_error_string(code);
+        if ptr.is_null() {
+            format!("cudaError {code}")
+        } else {
+            CStr::from_ptr(ptr).to_string_lossy().into_owned()
+        }
+    }
 }
 
 fn status_message(status: sys::cujson_status) -> String {
@@ -48,7 +63,7 @@ fn map_error(status: sys::cujson_status, out: &sys::cujson_tape) -> Error {
         },
         sys::CUJSON_ERR_CUDA => Error::Cuda {
             code: out.cuda_error,
-            message: format!("CUDA runtime error (cudaError {})", out.cuda_error),
+            message: cuda_error_string(out.cuda_error),
         },
         _ => {
             let _ = status_message(status); // best-effort, ignored if unrecognized
@@ -57,8 +72,38 @@ fn map_error(status: sys::cujson_status, out: &sys::cujson_tape) -> Error {
     }
 }
 
+/// Cached result of `cujson_device_count()`: `Ok(count)` (always `>= 1` —
+/// `count == 0` is stored as `Err(0)` so the cache and `Error` agree) or
+/// `Err(negated cudaError)` from the driver call itself failing. Checked
+/// once per process, under `GPU_LOCK`, before the first
+/// `parse_standard`/`parse_lines` call: without this, cuJSON's own C++
+/// (`capi_standard.cu`/`capi_lines.cu`) can throw a `thrust::system_error`
+/// which the shim maps to `CUJSON_ERR_CUDA` — but on some code paths a
+/// generic `catch (...)` still lost that to `CUJSON_ERR_INTERNAL`, so this
+/// check makes `parse`/`parse_lines` fail the same explicit way
+/// `cuda_info()` does (`Error::NoDevice`/`Error::Cuda`) rather than
+/// relying on the C++ exception path alone.
+static DEVICE_CHECK: OnceLock<Result<i32, i32>> = OnceLock::new();
+
+/// Must be called with `GPU_LOCK` held.
+fn device_available() -> Result<(), Error> {
+    let result = *DEVICE_CHECK.get_or_init(|| {
+        let count = unsafe { sys::cujson_device_count() };
+        if count < 0 { Err(-count) } else { Ok(count) }
+    });
+    match result {
+        Ok(count) if count > 0 => Ok(()),
+        Ok(_) => Err(Error::NoDevice),
+        Err(code) => Err(Error::Cuda {
+            code,
+            message: cuda_error_string(code),
+        }),
+    }
+}
+
 pub(crate) fn parse_standard(data: &[u8]) -> Result<Tape, Error> {
     let _guard = lock();
+    device_available()?;
     let mut out = sys::cujson_tape::default();
     let status = unsafe { sys::cujson_parse_standard(data.as_ptr(), data.len(), &mut out) };
     if status != sys::CUJSON_OK {
@@ -69,6 +114,7 @@ pub(crate) fn parse_standard(data: &[u8]) -> Result<Tape, Error> {
 
 pub(crate) fn parse_lines(data: &[u8], chunk_bytes: usize) -> Result<Tape, Error> {
     let _guard = lock();
+    device_available()?;
     let mut out = sys::cujson_tape::default();
     let status =
         unsafe { sys::cujson_parse_lines(data.as_ptr(), data.len(), chunk_bytes, &mut out) };
@@ -85,24 +131,18 @@ pub(crate) fn cuda_info() -> Result<CudaInfo, Error> {
     if version < 0 {
         return Err(Error::Cuda {
             code: -version,
-            message: format!("cudaRuntimeGetVersion failed (cudaError {})", -version),
+            message: cuda_error_string(-version),
         });
     }
 
+    let driver_version = unsafe { sys::cujson_cuda_driver_version() };
+
+    // On a machine with no NVIDIA driver at all this is the graceful path:
+    // cudaGetDeviceCount returns an error code (typically
+    // cudaErrorInsufficientDriver/cudaErrorNoDevice) rather than crashing,
+    // so this becomes an `Err`, never a panic.
+    device_available()?;
     let count = unsafe { sys::cujson_device_count() };
-    if count < 0 {
-        // On a machine with no NVIDIA driver at all this is the graceful
-        // path: cudaGetDeviceCount returns an error code (typically
-        // cudaErrorInsufficientDriver/cudaErrorNoDevice) rather than
-        // crashing, so this becomes an `Err`, never a panic.
-        return Err(Error::Cuda {
-            code: -count,
-            message: format!("cudaGetDeviceCount failed (cudaError {})", -count),
-        });
-    }
-    if count == 0 {
-        return Err(Error::NoDevice);
-    }
 
     let mut devices = Vec::with_capacity(count as usize);
     for index in 0..count {
@@ -129,5 +169,18 @@ pub(crate) fn cuda_info() -> Result<CudaInfo, Error> {
         runtime_version: version,
         devices,
         compiled_archs,
+        driver_version,
     })
+}
+
+pub(crate) fn mem_get_info() -> Result<(usize, usize), Error> {
+    let _guard = lock();
+    device_available()?;
+    let mut free = 0usize;
+    let mut total = 0usize;
+    let status = unsafe { sys::cujson_mem_get_info(&mut free, &mut total) };
+    if status != sys::CUJSON_OK {
+        return Err(Error::Internal);
+    }
+    Ok((free, total))
 }

@@ -8,6 +8,7 @@
 #include "upstream/cujson_error.h"
 
 #include <cuda_runtime.h>
+#include <thrust/system_error.h>
 #include <cstdint>
 #include <climits>
 
@@ -40,7 +41,22 @@ extern "C" cujson_status cujson_parse_standard(const uint8_t* data, size_t size,
             default:
                 return CUJSON_ERR_INTERNAL;
         }
+    } catch (const thrust::system_error& e) {
+        // Thrust throws this (a std::runtime_error subclass carrying the
+        // cudaError_t) when CUDA itself is unusable (no driver, driver too
+        // old, ...) — report it as CUJSON_ERR_CUDA with that code instead
+        // of losing it to CUJSON_ERR_INTERNAL.
+        out->cuda_error = static_cast<int32_t>(e.code().value());
+        return CUJSON_ERR_CUDA;
     } catch (...) {
+        // Anything else: check whether CUDA itself left an error behind
+        // (the same failure mode as the thrust::system_error case, just
+        // not thrown as one) before falling back to INTERNAL.
+        cudaError_t cerr = cudaGetLastError();
+        if (cerr != cudaSuccess) {
+            out->cuda_error = static_cast<int32_t>(cerr);
+            return CUJSON_ERR_CUDA;
+        }
         return CUJSON_ERR_INTERNAL;
     }
 
