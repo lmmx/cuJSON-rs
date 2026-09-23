@@ -6,6 +6,99 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+/// Longest single value rendered in a mismatch report before truncation.
+#[cfg(any(feature = "cuda", test))]
+const TRUNCATE_AT: usize = 200;
+
+#[cfg(any(feature = "cuda", test))]
+fn truncate(s: &str) -> String {
+    if s.len() <= TRUNCATE_AT {
+        s.to_string()
+    } else {
+        // Round down to a char boundary so a multi-byte UTF-8 sequence
+        // isn't split.
+        let mut end = TRUNCATE_AT;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}... ({} bytes total)", &s[..end], s.len())
+    }
+}
+
+#[cfg(any(feature = "cuda", test))]
+fn escape_pointer_token(tok: &str) -> String {
+    tok.replace('~', "~0").replace('/', "~1")
+}
+
+/// First JSON-Pointer path (RFC 6901) at which `a` and `b` differ, with
+/// both values at that path (each truncated to `TRUNCATE_AT` bytes) — or
+/// `None` if they're equal. Recurses into objects/arrays only while both
+/// sides agree on shape; any type/key/length mismatch is reported at the
+/// pointer to the mismatched container itself. Used by both
+/// `verify_standard` (root-vs-root) and `verify_lines` (per line), so a
+/// `to_value vs serde_json` FAIL always names where the values disagree
+/// instead of just "values differ".
+#[cfg(any(feature = "cuda", test))]
+fn first_value_diff(a: &serde_json::Value, b: &serde_json::Value) -> Option<(String, String, String)> {
+    fn go(pointer: &str, a: &serde_json::Value, b: &serde_json::Value) -> Option<String> {
+        use serde_json::Value;
+        match (a, b) {
+            (Value::Object(am), Value::Object(bm)) => {
+                if am.len() != bm.len() || am.keys().any(|k| !bm.contains_key(k)) {
+                    return Some(pointer.to_string());
+                }
+                for (k, av) in am {
+                    let bv = bm.get(k)?;
+                    let child = format!("{pointer}/{}", escape_pointer_token(k));
+                    if let Some(p) = go(&child, av, bv) {
+                        return Some(p);
+                    }
+                }
+                None
+            }
+            (Value::Array(aa), Value::Array(ba)) => {
+                if aa.len() != ba.len() {
+                    return Some(pointer.to_string());
+                }
+                for (i, (av, bv)) in aa.iter().zip(ba.iter()).enumerate() {
+                    let child = format!("{pointer}/{i}");
+                    if let Some(p) = go(&child, av, bv) {
+                        return Some(p);
+                    }
+                }
+                None
+            }
+            _ if a == b => None,
+            _ => Some(pointer.to_string()),
+        }
+    }
+
+    let pointer = go("", a, b)?;
+    // Re-resolve the pointer to fetch the (possibly non-scalar) values at
+    // the point of disagreement, for the printed report.
+    let av = if pointer.is_empty() {
+        a
+    } else {
+        resolve_pointer(a, &pointer).unwrap_or(a)
+    };
+    let bv = if pointer.is_empty() {
+        b
+    } else {
+        resolve_pointer(b, &pointer).unwrap_or(b)
+    };
+    let pointer = if pointer.is_empty() {
+        "/".to_string()
+    } else {
+        pointer
+    };
+    Some((pointer, truncate(&av.to_string()), truncate(&bv.to_string())))
+}
+
+#[cfg(any(feature = "cuda", test))]
+fn resolve_pointer<'v>(v: &'v serde_json::Value, pointer: &str) -> Option<&'v serde_json::Value> {
+    v.pointer(pointer)
+}
+
 #[cfg(feature = "cuda")]
 const LARGE_RECORD: &[u8] = include_bytes!("../../../tests/fixtures/twitter_sample_large_record.json");
 #[cfg(feature = "cuda")]
@@ -152,14 +245,16 @@ fn verify_standard(checks: &mut Checks, label: &str, bytes: &[u8]) {
     let gpu_value = gpu.root().to_value();
     let serde_value: Result<serde_json::Value, _> = serde_json::from_slice(bytes);
     match serde_value {
-        Ok(sv) if sv == gpu_value => {
-            checks.record(&format!("{label}: to_value vs serde_json"), true, None)
-        }
-        Ok(_) => checks.record(
-            &format!("{label}: to_value vs serde_json"),
-            false,
-            Some("root values differ"),
-        ),
+        Ok(sv) => match first_value_diff(&gpu_value, &sv) {
+            None => checks.record(&format!("{label}: to_value vs serde_json"), true, None),
+            Some((pointer, a, b)) => checks.record(
+                &format!("{label}: to_value vs serde_json"),
+                false,
+                Some(&format!(
+                    "first mismatch at {pointer}: gpu={a} serde_json={b}"
+                )),
+            ),
+        },
         Err(e) => checks.record(
             &format!("{label}: to_value vs serde_json"),
             false,
@@ -209,15 +304,19 @@ fn verify_lines(checks: &mut Checks, label: &str, bytes: &[u8], chunk_bytes: usi
             (Some(gnode), Some(sline)) => {
                 let gv = gnode.to_value();
                 match serde_json::from_str::<serde_json::Value>(sline) {
-                    Ok(sv) if sv == gv => {}
-                    Ok(_) => {
-                        checks.record(
-                            &format!("{label}: line {idx} to_value vs serde_json"),
-                            false,
-                            Some("values differ"),
-                        );
-                        return;
-                    }
+                    Ok(sv) => match first_value_diff(&gv, &sv) {
+                        None => {}
+                        Some((pointer, a, b)) => {
+                            checks.record(
+                                &format!("{label}: line {idx} to_value vs serde_json"),
+                                false,
+                                Some(&format!(
+                                    "first mismatch at {pointer}: gpu={a} serde_json={b}"
+                                )),
+                            );
+                            return;
+                        }
+                    },
                     Err(e) => {
                         checks.record(
                             &format!("{label}: line {idx} to_value vs serde_json"),
@@ -244,4 +343,64 @@ fn verify_lines(checks: &mut Checks, label: &str, bytes: &[u8], chunk_bytes: usi
         true,
         None,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn equal_values_have_no_diff() {
+        let a = json!({"x": [1, 2, {"y": "z"}]});
+        let b = a.clone();
+        assert!(first_value_diff(&a, &b).is_none());
+    }
+
+    #[test]
+    fn top_level_scalar_mismatch_points_at_root() {
+        let (pointer, a, b) = first_value_diff(&json!(1), &json!(2)).unwrap();
+        assert_eq!(pointer, "/");
+        assert_eq!(a, "1");
+        assert_eq!(b, "2");
+    }
+
+    #[test]
+    fn nested_object_mismatch_reports_full_pointer() {
+        let a = json!({"a": {"b": [1, 2, 3]}});
+        let b = json!({"a": {"b": [1, 9, 3]}});
+        let (pointer, av, bv) = first_value_diff(&a, &b).unwrap();
+        assert_eq!(pointer, "/a/b/1");
+        assert_eq!(av, "2");
+        assert_eq!(bv, "9");
+    }
+
+    #[test]
+    fn missing_key_reports_pointer_to_object() {
+        let a = json!({"a": 1, "b": 2});
+        let b = json!({"a": 1});
+        let (pointer, _, _) = first_value_diff(&a, &b).unwrap();
+        assert_eq!(pointer, "/");
+    }
+
+    #[test]
+    fn pointer_token_escaping() {
+        let a = json!({"a/b": 1});
+        let b = json!({"a/b": 2});
+        let (pointer, _, _) = first_value_diff(&a, &b).unwrap();
+        assert_eq!(pointer, "/a~1b");
+    }
+
+    #[test]
+    fn long_values_are_truncated() {
+        let long = "x".repeat(500);
+        let out = truncate(&long);
+        assert!(out.len() < 500);
+        assert!(out.contains("500 bytes total"));
+    }
+
+    #[test]
+    fn short_values_are_not_truncated() {
+        assert_eq!(truncate("short"), "short");
+    }
 }
