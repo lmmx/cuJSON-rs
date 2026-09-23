@@ -125,63 +125,157 @@ kernel:
 
 ## 4. `depth`
 
-`cuJSONResult::depth` (`cujson_types.h:30`) is read by the iterator as `jsonDepth`
-(`query_iterator_standard_json.cpp:99`) but no write site for `parsed_tree.depth` was
-found in `parse_standard_json.cu` or `parse_json_lines.cu` in the portions read for this
-task (see Unresolved) — `Parser`'s internal `depth_init_MathAPI` +
-`thrust::inclusive_scan` (`parse_standard_json.cu:1534-1543`) computes a *per-opener*
-depth value used only to sort brackets for pairing, and is not obviously the same value
-copied out to `cuJSONResult::depth`. The CPU reference builder computes `depth` as the
-maximum bracket-nesting depth of the document (root array/object at depth 1, consistent
-with `jsonDepth` starting semantics implied by `node_depth = 1` comments at
-`query_iterator_standard_json.cpp:43,269`), and flags this as a hypothesis.
+**Finding: upstream never writes `cuJSONResult::depth`.** `grep -n '\.depth\|depth ='` over
+`parse_standard_json.cu` and `parse_json_lines.cu` finds exactly two matches, and both are
+an unrelated *local* variable that happens to share the name, aliasing the bracket-pairing
+scratch buffer: `uint32_t* depth = oc_1;` (`parse_standard_json.cu:1538`,
+`parse_json_lines.cu:1033`). Neither file ever assigns to `parsed_tree.depth` or any other
+`cuJSONResult`-typed field named `depth`. `depth_init_MathAPI` +
+`thrust::inclusive_scan`/`transform_if` (`parse_standard_json.cu:1534-1543`,
+`parse_json_lines.cu:1030-1037`) compute a *per-opener* nesting depth used only to sort
+brackets before pairing (`thrust::stable_sort_by_key` on that same buffer,
+`parse_standard_json.cu:1548`-ish/`parse_json_lines.cu:1042`) — it is freed
+(`cudaFreeAsync(depth, 0)`) rather than copied out anywhere.
+
+Both construction sites — `cuJSONResult parsed_tree;` (`parse_standard_json.cu:1589`,
+`parse_json_lines.cu:1103`) — are plain default-initialization of an aggregate struct with
+no user-declared constructor and no default member initializers (`cujson_types.h:22-32`),
+so `depth` (and every other scalar field) reads as **indeterminate stack garbage** on the
+success path, not zero. The only place this struct is zero-initialized is the early-error
+`return cuJSONResult{};` value-initialization on the validation-failure paths (e.g.
+`parse_json_lines.cu:1114,1119,1124,1129`), which never reaches a real parse.
+
+`cuJSONResult::depth` (`cujson_types.h:30`) is nonetheless *read* by the iterator as
+`jsonDepth` (`query_iterator_standard_json.cpp:99`) — so the iterator trusts a field the
+kernel never sets, on the assumption some other unread code path sets it, or that it was
+never exercised. The Rust builder still computes its own `depth` (max bracket-nesting
+depth, root at depth 1, consistent with `node_depth = 1` comments at
+`query_iterator_standard_json.cpp:43,269`) because the navigator needs *some* depth value
+internally, but this field has **no GPU counterpart to diff against** — task 10's
+differential test must exclude `Tape::depth` from its comparison entirely, not just mask
+it, since there is no defined kernel value to compare it to (see `Tape::depth`'s doc
+comment in `storage.rs`).
 
 ## 5. JSON Lines (`parse_json_lines`)
 
-Each chunk (one JSON value per line) is parsed independently by the same
-tokenizer/parser pipeline, with a running `lastStructuralIndex` (structural-entry count
-so far) and `lastChunkIndex` (byte count so far) threaded into `stage2_tokenizer` so that
-each chunk's structural offsets are expressed in the coordinate space of the whole
-concatenated `input.data` (`parse_json_lines.cu:1190,1231-1232`) — i.e. structural offsets
-are **global**, not per-chunk-relative.
+`parse_json_lines` is a **different pipeline** from Standard mode, in `parse_json_lines.cu`
+— it does not reuse the Standard kernels. The host loop (`parse_json_lines`,
+`parse_json_lines.cu:1101-1273`) splits the input into `input.chunkCount` chunks (each
+containing one or more whole lines — see the chunk-boundary note below), and for each
+chunk `i` launches, in order:
+
+- `checkAscii` (`:272`) / `checkUTF8` (`:287`) — UTF-8 validation, via `stage1_UTF8Validator`.
+- `bitMapCreatorSimd` (`:849`, function body `:423-536`) — **this is a distinct function
+  from the Standard-mode `bitMapCreatorSimd` in `parse_standard_json.cu`** (same name,
+  different translation unit, different behaviour): its structural class
+  (`temp_colon_comma_newline`/`temp2_colon_comma_newline`, `:453-456`/`:495-498`)
+  *includes* `0x0A` (`\n`), uncommented and live — unlike the Standard-mode function,
+  where the equivalent line is commented out (§1). So in Lines mode, every unescaped `\n`
+  outside a string is structural, exactly like `{ } [ ] : ,`.
+- `fusedStep2_3` (`:857`) / `buildStringMask` (`:870`) — same quote/string-mask logic as
+  Standard mode, applied to this chunk.
+- `fusedStep3_4` (`:876`, body `:695-721`) — masks the structural bitmap (which now
+  includes `\n`) by the string mask: `str_mask[k] = ~curr_str_mask & all_structural`
+  (`:709`) — so a `\n` *inside* a string is excluded exactly like a bracket or comma
+  inside a string would be (§1's rule applies uniformly, `\n` included).
+- `extractStructuralIdx` (`:918`, body `:740-804`) — turns the masked bitmap into offsets.
+  Line `:792`, `out_string_8_index_GPU[adjusted_index] = k + j + 1 + lastChunkIndex;`,
+  **confirms** the global-offset claim below by direct inspection (this resolves what was
+  previously listed as Unresolved #5: `lastChunkIndex` is added to every emitted offset,
+  not merely inferred from variable names).
+- `map_open_close` (`:1029`, body `:946-958`) / `validate_expand` (`:1056`, body
+  `:961-1015`) — bracket-only pairing for this chunk. Note the name: it is
+  `validate_expand`, not `validate_expand_MathAPI_new2` (that name belongs to a different
+  file/mode and must not be cited here). `endIdx[index_arr[k]] = index_arr[k+1] +
+  lastStructuralIndex + 1;` (`:983`, `:995-996`, `:1007-1008`) is the same
+  opener-index-to-closer-index write pattern as Standard mode's `validate_expand`
+  counterpart (§3), with `lastStructuralIndex` folding in this chunk's running offset.
+
+`stage2_tokenizer` (`:808-943`) and `stage3_parser` (`:1016-1074`) are both fully defined
+in this file — an earlier draft of this document called them "not fully read"; that was
+wrong. `stage2_tokenizer` runs the five kernels above in order and returns structural
+offsets already in global (whole-`input.data`) coordinate space, via the `lastChunkIndex`
+add at `:792`. `stage3_parser` runs `map_open_close`/`validate_expand` and returns a
+chunk-local buffer laid out as `[structural row][pair_pos row]`, both already expressed
+in *global* tape-index space because `lastStructuralIndex` was folded into `validate_expand`
+at `:1056` (`stage3_parser`'s own `lastStructuralIndex` parameter, `:1016`).
 
 Per chunk `i`, `resultSizes[i]` is that chunk's structural-entry count and
 `resultSizesPrefix[i]` is the running total after chunk `i`
-(`parse_json_lines.cu:1226-1228`). `mergeChunks` concatenates every chunk's structural
-row into one buffer at `resultBuffer[1 + start_pos .. ]` where `start_pos =
-resultSizesPrefix[i-1]` (`0` for `i == 0`), and every chunk's pair_pos row into
-`resultBuffer[1 + start_pos + resultSizesPrefix[last] + 1 .. ]`
-(`parse_json_lines.cu:1087-1095`). This reproduces the single-document layout — one
-leading artificial `0`, the concatenated structural offsets, then (after the same
-`resultSizesPrefix[last] + 1` gap used for the single-document `pair_pos` offset) the
-concatenated pair_pos values — over the whole multi-chunk tape, with **no artificial
-trailing close appended per chunk**: chunk boundaries are visible only through
-`resultSizesPrefix`, not through extra tape entries. (`parse_standard_json.cu`'s
-per-chunk `pair_pos` values, computed with `lastStructuralIndex` already added per
-`parse_json_lines.cu:1203`, land directly in final tape-index space, so no
-renumbering happens in `mergeChunks`.)
+(`parse_json_lines.cu:1226-1228`). `mergeChunks` (`:1076-1096`) concatenates every chunk's
+structural row into one buffer at `resultBuffer[1 + start_pos ..]` where `start_pos =
+resultSizesPrefix[i-1]` (`0` for `i == 0`, `:1088-1089,1092`), and every chunk's pair_pos
+row into `resultBuffer[1 + start_pos + resultSizesPrefix[last] + 1 ..]` (`:1094`). This
+reproduces the single-document layout — one leading artificial `0`, the concatenated
+structural offsets, then (after the same `resultSizesPrefix[last] + 1` gap used for the
+single-document `pair_pos` offset) the concatenated pair_pos values — over the whole
+multi-chunk tape, with **no artificial trailing close appended per chunk**: chunk
+boundaries are visible only through `resultSizesPrefix`, not through extra tape entries.
+Because both the structural offsets (`lastChunkIndex`, confirmed above) and the pair_pos
+values (`lastStructuralIndex`, confirmed above) are already in final tape-index/byte-space
+before `mergeChunks` runs, `mergeChunks` does pure concatenation — no renumbering.
 
 `totalResultSize = total_result_size + 2` and `fileSize = lastStructuralIndex + 2`
 (`parse_json_lines.cu:1262-1263`) are equal here (`lastStructuralIndex` ends at
 `total_result_size`), unlike the field-name difference implied in §2 — both count the
 final tape length including the two artificial entries.
 
-A `\n` byte landing at a structural offset (i.e. the newline used to separate two JSON
-values inside one chunk, or possibly a raw `\n` chosen as a chunk's delimiter) is read
-back as `','` by `getChar` (`query_iterator_standard_json.cpp:161-163`), effectively
-making consecutive per-line documents look like elements of one array/stream to the
-navigator. The CPU reference builder's `Mode::Lines` reproduces this: it records a
-structural entry at each line-separating `\n` and the built tape's `getChar`-equivalent
-returns `,` for it, matching the kernel path bit for bit in intent though the *value*
-stored in `structural[i]` is the real byte offset of the `\n`, not a synthetic comma
-byte — consistent with §1/§2 (the offset is stored, translation to `,` happens at read
-time).
+A `\n` byte landing at a structural offset is read back as `','` by `getChar`
+(`query_iterator_standard_json.cpp:161-163`), effectively making consecutive per-line
+documents look like elements of one array/stream to the navigator. The CPU reference
+builder's `Mode::Lines` reproduces this with a single whole-input scan (`builder.rs`'s
+`scan_structural(.., mark_newline: true)`) rather than a per-line split: since brackets
+never span a `\n` in valid per-line JSON, a stack-based scan that also marks every
+unescaped-outside-a-string `\n` structural produces the identical structural/pair_pos
+content as the kernel's per-chunk-then-merge process, without needing to reproduce
+chunking at all (see the newline-case rules below).
+
+### Newline semantics (four cases)
+
+All four are determinable from the kernel/loader source read for this task; none require
+guessing.
+
+1. **Trailing `\n` at EOF.** `bitMapCreatorSimd`'s structural class has no end-of-input
+   special case for `\n` beyond the generic last-word tail handling shared by every other
+   structural byte (`:461-472`). A trailing `\n` gets its own structural entry, read back
+   as `,` by `getChar`, immediately before the tape's artificial closing entry. The CPU
+   builder matches this exactly (the whole-input scan doesn't special-case a trailing
+   `\n` either). `Document::lines()` (navigator layer, not tape format) filters out the
+   resulting empty scalar span rather than yielding a phantom trailing value — see its
+   doc comment in `document.rs`.
+2. **Blank lines / consecutive `\n\n`.** Same reasoning: each `\n` is independently
+   structural, unconditionally — nothing in `bitMapCreatorSimd`, `fusedStep3_4`, or
+   `extractStructuralIdx` merges or dedupes adjacent structural bits. Two consecutive
+   `\n` bytes give two consecutive structural entries, both reading back as `,`, with
+   nothing between them. The CPU builder matches this exactly; `Document::lines()` again
+   filters the resulting empty span.
+3. **CRLF (`\r` immediately before `\n`).** `\r` is `0x0D`; no comparison against `0x0D`
+   appears anywhere in `bitMapCreatorSimd` (Standard or Lines variant) or any other
+   tokenizer kernel in either `.cu` file (confirmed by grep — the only `\r`-related text
+   in either upstream file is a commented-out line, `parse_standard_json.cu:405`). `\r`
+   is therefore never structural and never specially skipped; it is ordinary
+   non-structural whitespace, identical in treatment to a space or tab byte. The CPU
+   builder already treats it this way (falls through `scan_structural`'s `_ => {}` arm).
+4. **A chunk boundary falling near/at a newline.** This is a host-loader property, not a
+   kernel one: `loadJSONLines_chunkCount`/`_chunkSizeBytes`/`_chunkSizeMegaBytes`
+   (`load_file.cu`) build a `line_offsets` table by scanning for `\n` bytes first, then
+   only ever cut a chunk boundary at one of those offsets (`load_file.cu`'s
+   `start_offset`/`end_offset = line_offsets[...]` in the chunk-count loader, and the
+   `if ((line_end - current_chunk_start) > chunkSizeBytes)` cut-on-line-boundary check in
+   the byte/megabyte loaders) — never mid-line, never splitting a `\n` from the byte
+   before it. A `\n` is therefore always fully contained in exactly one chunk. Combined
+   with `lastChunkIndex`/`lastStructuralIndex` correctly threading chunk-relative results
+   into global tape coordinates (confirmed above), a multi-chunk parse of some input is
+   provably equivalent, structural-entry for structural-entry, to a single-chunk parse of
+   the same input — chunking is a pure parallelism detail with no visible effect on tape
+   content. The CPU reference builder never chunks at all (one call, one buffer), which is
+   exactly the "chunk count = 1" case of this equivalence, so no chunk-boundary-specific
+   code is needed in `builder.rs`; `lines_chunk_boundary_is_a_noop_for_cpu_builder` in
+   `crates/cujson/tests/tape_tests.rs` records this reasoning as a test.
 
 `Document::lines()` (this crate) does not attempt to reconstruct `cuJSONLinesInput`
-chunking; it walks the merged, single flat tape and splits at top-level commas exactly
-as `getChar` would present them, which is observably equivalent for chunks that contain
-exactly one JSON value each (the documented use case — `cujsonlines.h`, not fully read
-in this task).
+chunking (chunking has no effect on tape content per case 4 above); it walks the merged,
+single flat tape and splits at top-level commas exactly as `getChar` would present them.
 
 ## 6. Empty containers and top-level scalars
 
@@ -210,12 +304,11 @@ These are open because the upstream source read for this task does not settle th
 settles them inconsistently between kernel and iterator. Do not guess past what is
 written here.
 
-1. **`cuJSONResult::depth` write site not located.** No assignment to `parsed_tree.depth`
-   was found in `parse_standard_json.cu` or `parse_json_lines.cu`. It may be set in a
-   file not read for this task, or it may simply be left as default-initialised garbage
-   upstream. The CPU reference builder computes it as max bracket-nesting depth (root =
-   depth 1) as a best-effort value; **this is a hypothesis about intended semantics, not
-   a verified match to kernel output.**
+1. ~~`cuJSONResult::depth` write site not located.~~ **Resolved as a finding, see §4**:
+   upstream genuinely never writes it (confirmed by grep), and the struct is default- not
+   value-initialized on the success path, so the field is indeterminate garbage upstream.
+   The Rust builder's own `depth` has no GPU value to match and must be excluded from
+   task 10's differential test.
 2. **`pair_pos` for non-opener entries is undefined**, not just "not part of the public
    API" — `cudaMallocHost` does not zero-fill, and no kernel writes those slots (§3). A
    differential test against real GPU output (task 10) cannot assert equality on those
@@ -241,13 +334,11 @@ written here.
    judged out of scope for a from-scratch Rust builder. Fixture/property tests in this
    task only use space-separated/compact/pretty (`serde_json`-formatted, LF+space)
    JSON, so this divergence is not exercised by tier-1 tests.
-5. **JSON-Lines global-offset claim (§5)** — that `lastChunkIndex`/`lastStructuralIndex`
-   thread through `stage2_tokenizer` to produce globally-addressed structural offsets —
-   is inferred from the accumulator variables' names and update sites
-   (`parse_json_lines.cu:1231-1232`) and from `mergeChunks`' flat concatenation
-   (`parse_json_lines.cu:1087-1095`); `stage2_tokenizer`'s own body (in a file not
-   fully read for this task) was not inspected to confirm it actually adds
-   `lastChunkIndex` to each byte offset it emits.
+5. ~~JSON-Lines global-offset claim (§5).~~ **Resolved**: `stage2_tokenizer`'s body was
+   read in full; `extractStructuralIdx` (`parse_json_lines.cu:792`) directly adds
+   `lastChunkIndex` to every emitted structural offset, and `validate_expand`
+   (`:983,995-996,1007-1008`) directly adds `lastStructuralIndex` to every pair_pos
+   value — both confirmed by inspection, not inferred from names.
 6. **Top-level scalar documents (§6)**: whether `parse_standard_json` is meant to
    support them at all, versus always expecting an object/array root, is not stated by
    any comment or check in the ~1550-1690 assembly region read for this task. The CPU

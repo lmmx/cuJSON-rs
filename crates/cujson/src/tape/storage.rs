@@ -43,6 +43,10 @@ impl From<Box<[i32]>> for TapeStorage {
 pub struct Tape {
     pub structural: TapeStorage,
     pub pair_pos: TapeStorage,
+    /// Max bracket-nesting depth, computed by this crate for internal/navigator
+    /// use only. **Has no GPU counterpart**: upstream never writes
+    /// `cuJSONResult::depth` (`tape/FORMAT.md` §4) — task 10's differential test
+    /// must exclude this field from comparison entirely, not mask it.
     pub depth: i32,
 }
 
