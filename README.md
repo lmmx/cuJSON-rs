@@ -31,7 +31,7 @@ Rust implementation of cuJSON: A Highly Parallel JSON Parser for GPUs (ASPLOS �
   `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run` —
   a manual dispatch never publishes.
 
-Release artifacts: the `cujson-rs` Python wheel and a `cujson-cu13-*.tar.gz` CLI tarball, both
+Release artifacts: the `cujson` Python wheel and a `cujson-cu13-*.tar.gz` CLI tarball, both
 built with CUDA 13, and the `cujson-sys`/`cujson` crates on crates.io. On CUDA 12, build from a
 checkout instead: `pip install ./crates/cujson-py` or `cargo build --release -p cujson-cli
 --features cuda` (with CUDA 12's `nvcc` on `PATH`).
@@ -39,8 +39,7 @@ checkout instead: `pip install ./crates/cujson-py` or `cargo build --release -p 
 ### Making a release
 
 One version, `[workspace.package] version` in the root `Cargo.toml`, covers every crate and the
-Python wheel (maturin reads it). The Python distribution is `cujson-rs`; it installs the `cujson`
-module.
+Python wheel (maturin reads it). The Python package shares its name, `cujson`, with the main crate.
 
 #### First release (manual)
 
@@ -62,7 +61,7 @@ first release is published by hand.
 3. Configure trusted publishing, all pointing at repository `lmmx/cuJSON-rs`, workflow
    `release.yml`:
    - crates.io: on each of `cujson-sys` and `cujson`, Settings → Trusted Publishing.
-   - PyPI: on `cujson-rs`, Publishing → add a GitHub publisher with environment `pypi`, and
+   - PyPI: on `cujson`, Publishing → add a GitHub publisher with environment `pypi`, and
      create the `pypi` environment in the repository settings.
 
 Don't push a `v0.1.0` tag for the manual release: it would start `release.yml`, which would fail
