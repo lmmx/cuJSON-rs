@@ -14,6 +14,12 @@ use std::path::{Path, PathBuf};
 use cujson::cpu;
 use cujson::tape::{Mode, diff_tapes};
 
+/// The tests below sample GPU-wide memory, so they must not overlap.
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
 }
@@ -25,6 +31,7 @@ fn read_fixture(name: &str) -> Vec<u8> {
 #[test]
 #[ignore = "requires GPU"]
 fn standard_fixture_matches_serde_json() {
+    let _serial = serial();
     let bytes = read_fixture("twitter_sample_large_record.json");
     let expected: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
 
@@ -35,6 +42,7 @@ fn standard_fixture_matches_serde_json() {
 #[test]
 #[ignore = "requires GPU"]
 fn lines_fixture_matches_serde_json() {
+    let _serial = serial();
     let bytes = read_fixture("twitter_sample_small_records.json");
     let expected: Vec<serde_json::Value> = bytes
         .split(|&b| b == b'\n')
@@ -51,6 +59,7 @@ fn lines_fixture_matches_serde_json() {
 #[test]
 #[ignore = "requires GPU"]
 fn standard_fixture_tape_matches_cpu_reference() {
+    let _serial = serial();
     let bytes = read_fixture("twitter_sample_large_record.json");
     let gpu_doc = cujson::parse(&bytes).expect("GPU parse");
     let cpu_doc = cpu::parse(&bytes, Mode::Standard).expect("cpu::parse");
@@ -61,6 +70,7 @@ fn standard_fixture_tape_matches_cpu_reference() {
 #[test]
 #[ignore = "requires GPU"]
 fn lines_fixture_tape_matches_cpu_reference() {
+    let _serial = serial();
     let bytes = read_fixture("twitter_sample_small_records.json");
     let gpu_doc =
         cujson::parse_lines(&bytes, cujson::LinesOptions::default()).expect("GPU parse_lines");
@@ -77,6 +87,7 @@ fn lines_fixture_tape_matches_cpu_reference() {
 #[test]
 #[ignore = "requires GPU"]
 fn lines_multi_chunk_tape_matches_cpu_reference() {
+    let _serial = serial();
     let bytes = read_fixture("twitter_sample_small_records.json");
     let small_chunk = cujson::LinesOptions { chunk_bytes: 256 };
     let gpu_doc = cujson::parse_lines(&bytes, small_chunk).expect("GPU parse_lines");
@@ -131,6 +142,7 @@ fn gen_value(rng: &mut Xorshift, depth: u32) -> serde_json::Value {
 #[test]
 #[ignore = "requires GPU"]
 fn fixed_seed_corpus_tape_matches_cpu_reference() {
+    let _serial = serial();
     let mut rng = Xorshift(0xC0FFEE_u64);
     for _ in 0..300 {
         let v = gen_value(&mut rng, 5);
@@ -146,6 +158,7 @@ fn fixed_seed_corpus_tape_matches_cpu_reference() {
 #[test]
 #[ignore = "requires GPU"]
 fn error_paths_then_valid_parse_still_works() {
+    let _serial = serial();
     // Invalid UTF-8.
     let bad_utf8 = [0x7B, 0xFF, 0x7D]; // `{`, invalid byte, `}`
     let err = cujson::parse(&bad_utf8).unwrap_err();
@@ -171,6 +184,7 @@ fn error_paths_then_valid_parse_still_works() {
 #[test]
 #[ignore = "requires GPU"]
 fn repeated_invalid_parses_do_not_grow_device_memory() {
+    let _serial = serial();
     fn memory_used_mb() -> Option<u64> {
         let out = std::process::Command::new("nvidia-smi")
             .args(["--query-gpu=memory.used", "--format=csv,noheader,nounits"])
@@ -179,6 +193,9 @@ fn repeated_invalid_parses_do_not_grow_device_memory() {
         String::from_utf8_lossy(&out.stdout).trim().parse().ok()
     }
 
+    // Creating the CUDA context costs ~300 MB of device memory; take it
+    // before sampling.
+    let _ = cujson::parse(b"{\"a\":1}");
     let before = memory_used_mb();
     for _ in 0..1000 {
         let _ = cujson::parse(b"{\"a\":1");
@@ -194,5 +211,70 @@ fn repeated_invalid_parses_do_not_grow_device_memory() {
             a <= b + 64,
             "device memory grew by more than 64MB over 1000 invalid parses: {b}MB -> {a}MB"
         );
+    }
+}
+
+fn rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .unwrap()
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("VmRSS:")?
+                .trim()
+                .strip_suffix("kB")?
+                .trim()
+                .parse()
+                .ok()
+        })
+        .unwrap()
+}
+
+#[test]
+#[ignore = "requires GPU (Linux)"]
+fn repeated_lines_parses_do_not_grow_host_memory() {
+    let _serial = serial();
+    let record = read_fixture("twitter_sample_small_records.json");
+    let mut input = Vec::new();
+    while input.len() < 16 << 20 {
+        input.extend_from_slice(&record);
+    }
+    let opts = cujson::LinesOptions {
+        chunk_bytes: 2 << 20,
+    };
+    for _ in 0..3 {
+        drop(cujson::parse_lines(&input, opts).expect("GPU parse"));
+    }
+    let before = rss_kb();
+    for _ in 0..30 {
+        drop(cujson::parse_lines(&input, opts).expect("GPU parse"));
+    }
+    let grown_mb = rss_kb().saturating_sub(before) / 1024;
+    // Each parse's tape is tens of MB; leaking it 30 times is well over this.
+    assert!(grown_mb < 100, "RSS grew {grown_mb} MB over 30 parses");
+}
+
+/// Tapes parsed from a recycled pinned buffer must equal the CPU reference,
+/// with two documents alive at once, across a `trim_pinned_cache` call.
+#[test]
+#[ignore = "requires GPU"]
+fn pinned_buffer_reuse_keeps_tapes_correct() {
+    let _serial = serial();
+    let std_bytes = read_fixture("twitter_sample_large_record.json");
+    let lines_bytes = read_fixture("twitter_sample_small_records.json");
+    let std_cpu = cpu::parse(&std_bytes, Mode::Standard).unwrap();
+    let lines_cpu = cpu::parse(&lines_bytes, Mode::Lines).unwrap();
+    for round in 0..4 {
+        let a = cujson::parse(&std_bytes).expect("GPU parse");
+        let b = cujson::parse_lines(&lines_bytes, cujson::LinesOptions::default())
+            .expect("GPU parse_lines");
+        let da = diff_tapes(&std_bytes, &a.tape, &std_cpu.tape);
+        assert!(da.is_none(), "round {round}: {}", da.unwrap());
+        let db = diff_tapes(&lines_bytes, &b.tape, &lines_cpu.tape);
+        assert!(db.is_none(), "round {round}: {}", db.unwrap());
+        drop(a);
+        drop(b);
+        if round == 1 {
+            cujson::trim_pinned_cache();
+        }
     }
 }

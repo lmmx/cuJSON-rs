@@ -1,6 +1,7 @@
 #include "parse_standard_json.h"         // Include the standard parse header
 #include "cujson_types.h"
 #include "cujson_error.h"
+#include "../pinned_cache.h"
 
 
 namespace cujson_std {
@@ -1695,7 +1696,7 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     // cudaMemcpy(1 + res_buf_arrays[0], result_GPU, sizeof(int32_t) * result_size, cudaMemcpyDeviceToHost); // first and last is for [ and ]
     // cudaMemcpy(1 + res_buf_arrays[0] + 1 + result_size,   result_GPU + result_size, sizeof(int32_t) * result_size, cudaMemcpyDeviceToHost); // first and last is for [ and ]
     int32_t* res_buff;
-    cudaMallocHost((void**)&res_buff, sizeof(int32_t) * (result_size + 2) * ROW2);  // Pinned memory for fast H2D copy
+    res_buff = (int32_t*) cujson_pinned_alloc(sizeof(int32_t) * (result_size + 2) * ROW2);  // Pinned memory for fast H2D copy
 
     // Copy results from device to host
     cudaMemcpy(1 + res_buff, result_GPU, sizeof(int32_t) * result_size, cudaMemcpyDeviceToHost);  // result 1

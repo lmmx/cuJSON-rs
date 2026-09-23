@@ -198,6 +198,17 @@ pub fn parse_file(path: impl AsRef<Path>) -> Result<Document<'static>, Error> {
     parse_owned(bytes)
 }
 
+/// Release the pinned host buffer kept for the next parse. After a parse,
+/// dropping its `Document` keeps at most one tape buffer (the largest
+/// recent one) pinned so the next parse skips `cudaMallocHost`; call this
+/// to give that memory back. No-op without the `cuda` feature.
+pub fn trim_pinned_cache() {
+    #[cfg(feature = "cuda")]
+    unsafe {
+        cujson_sys::cujson_pinned_cache_trim()
+    }
+}
+
 /// CUDA runtime version, visible devices, and this build's compiled
 /// architecture list. Without the `cuda` feature, always
 /// `Err(Error::CudaNotCompiled)`. On a machine with no NVIDIA driver

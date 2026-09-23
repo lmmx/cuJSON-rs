@@ -192,6 +192,16 @@ impl<'a> Document<'a> {
         self.read_value(0)
     }
 
+    /// Tape index of the separator (or closing wrapper) that follows each
+    /// top-level value, in order, including blank lines. Hops over
+    /// containers with `pair_pos`, so it touches one entry per line.
+    pub(super) fn top_level_delims(&self) -> impl Iterator<Item = usize> + '_ {
+        children_iter(self, 0, self.total() - 1).map(|node| match node.repr {
+            NodeRepr::Container { close, .. } => close + 1,
+            NodeRepr::Scalar { hi, .. } => hi,
+        })
+    }
+
     /// Iterate the top-level values of a JSON Lines document (or the single
     /// root value of a standard document, as a one-element iterator).
     ///
@@ -216,7 +226,7 @@ impl<'a> Document<'a> {
     }
 }
 
-fn scalar_kind(bytes: &[u8]) -> Kind {
+pub(super) fn scalar_kind(bytes: &[u8]) -> Kind {
     match bytes.first() {
         Some(b'"') => Kind::String,
         Some(b't') | Some(b'f') => Kind::Bool,
@@ -284,17 +294,32 @@ fn object_pairs<'a>(
 
 fn parse_hex4(bytes: &[u8], start: usize) -> Result<u32, Error> {
     let s = bytes.get(start..start + 4).ok_or(Error::InvalidEscape)?;
-    let s = std::str::from_utf8(s).map_err(|_| Error::InvalidEscape)?;
-    u32::from_str_radix(s, 16).map_err(|_| Error::InvalidEscape)
+    let mut v = 0u32;
+    for &b in s {
+        let d = match b {
+            b'0'..=b'9' => b - b'0',
+            b'a'..=b'f' => b - b'a' + 10,
+            b'A'..=b'F' => b - b'A' + 10,
+            _ => return Err(Error::InvalidEscape),
+        };
+        v = (v << 4) | u32::from(d);
+    }
+    Ok(v)
 }
 
-fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
+pub(super) fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
     if !bytes.contains(&b'\\') {
         return std::str::from_utf8(bytes)
             .map(Cow::Borrowed)
             .map_err(|_| Error::InvalidUtf8);
     }
     let mut out = String::with_capacity(bytes.len());
+    unescape_into(bytes, &mut out)?;
+    Ok(Cow::Owned(out))
+}
+
+/// Append the unescaped text of `bytes` to `out`.
+pub(super) fn unescape_into(bytes: &[u8], out: &mut String) -> Result<(), Error> {
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] != b'\\' {
@@ -362,7 +387,7 @@ fn unescape(bytes: &[u8]) -> Result<Cow<'_, str>, Error> {
             _ => return Err(Error::InvalidEscape),
         }
     }
-    Ok(Cow::Owned(out))
+    Ok(())
 }
 
 impl<'d> Node<'d> {

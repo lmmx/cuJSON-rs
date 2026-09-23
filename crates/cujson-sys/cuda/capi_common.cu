@@ -2,14 +2,77 @@
 // No upstream parser sources here, so no namespace collision concerns
 // with capi_standard.cu/capi_lines.cu (task 02 patch 5).
 #include "cujson_capi.h"
+#include "pinned_cache.h"
 
 #include <cuda_runtime.h>
 #include <cstdio>
+#include <mutex>
+#include <unordered_map>
+
+namespace {
+std::mutex g_pinned_mu;
+std::unordered_map<void*, size_t> g_pinned_cap;  // capacity of every live or cached buffer
+void* g_pinned_cached = nullptr;
+size_t g_pinned_cached_cap = 0;
+}  // namespace
+
+extern "C" void* cujson_pinned_alloc(size_t bytes) {
+    {
+        std::lock_guard<std::mutex> lock(g_pinned_mu);
+        // Reuse only a buffer of similar size, so a small parse does not
+        // pin a large one.
+        if (g_pinned_cached != nullptr && g_pinned_cached_cap >= bytes &&
+            g_pinned_cached_cap <= 2 * bytes) {
+            void* p = g_pinned_cached;
+            g_pinned_cached = nullptr;
+            g_pinned_cached_cap = 0;
+            return p;
+        }
+    }
+    void* p = nullptr;
+    if (cudaMallocHost(&p, bytes) != cudaSuccess) return nullptr;
+    std::lock_guard<std::mutex> lock(g_pinned_mu);
+    g_pinned_cap[p] = bytes;
+    return p;
+}
+
+extern "C" void cujson_pinned_free(void* p) {
+    if (p == nullptr) return;
+    void* release = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_pinned_mu);
+        auto it = g_pinned_cap.find(p);
+        if (it == g_pinned_cap.end() || p == g_pinned_cached) {
+            release = (p == g_pinned_cached) ? nullptr : p;
+        } else if (g_pinned_cached == nullptr || it->second > g_pinned_cached_cap) {
+            release = g_pinned_cached;
+            if (release != nullptr) g_pinned_cap.erase(release);
+            g_pinned_cached = p;
+            g_pinned_cached_cap = it->second;
+        } else {
+            g_pinned_cap.erase(it);
+            release = p;
+        }
+    }
+    if (release != nullptr) cudaFreeHost(release);
+}
+
+extern "C" void cujson_pinned_cache_trim(void) {
+    void* release = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_pinned_mu);
+        release = g_pinned_cached;
+        if (release != nullptr) g_pinned_cap.erase(release);
+        g_pinned_cached = nullptr;
+        g_pinned_cached_cap = 0;
+    }
+    if (release != nullptr) cudaFreeHost(release);
+}
 
 extern "C" void cujson_tape_free(cujson_tape* tape) {
     if (tape == nullptr) return;
     if (tape->_alloc != nullptr) {
-        cudaFreeHost(tape->_alloc);
+        cujson_pinned_free(tape->_alloc);
     }
     tape->structural = nullptr;
     tape->pair_pos = nullptr;

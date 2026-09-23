@@ -6,6 +6,7 @@
 mod document;
 mod error;
 mod storage;
+mod visit;
 
 #[cfg(feature = "cpu-reference")]
 mod builder;
@@ -16,6 +17,7 @@ pub use document::{Document, Kind, Node};
 pub use error::Error;
 pub(crate) use error::NOT_SINGLE_VALUE;
 pub use storage::{Tape, TapeStorage};
+pub use visit::Visitor;
 
 #[cfg(feature = "cuda")]
 pub(crate) use storage::tape_from_ffi;
