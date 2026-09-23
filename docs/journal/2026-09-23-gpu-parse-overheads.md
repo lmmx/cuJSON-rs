@@ -61,7 +61,8 @@ Version history: the leak fix (ed01209), the single-chunk copy (ce7ae93), the fi
 
 ## Missing
 
-- A persistent device workspace for the input buffer and the remaining per-parse `cudaMalloc` call
+- A persistent device workspace for the input buffer and the remaining per-parse `cudaMalloc` call (not built; see `2026-09-23-gpu-stage-trim-experiments.md`)
+- Skipping the `pair_pos` device-to-host copy was built and measured on branch `gpu-stage-trim` and not merged (`2026-09-23-gpu-stage-trim-experiments.md`)
 - Skipping the `pair_pos` device-to-host copy (41 MB of 82 MB per 233 MB pass) for consumers that only use `Visitor`
 - Overlapping a batch's input copy with the previous batch's tape copy within one call (`parse_lines` is one synchronous call per chunk)
 - A Python binding for `set_max_concurrent_parses` and `PinnedBuffer`
