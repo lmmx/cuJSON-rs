@@ -196,3 +196,41 @@ fn repeated_invalid_parses_do_not_grow_device_memory() {
         );
     }
 }
+
+fn rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .unwrap()
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("VmRSS:")?
+                .trim()
+                .strip_suffix("kB")?
+                .trim()
+                .parse()
+                .ok()
+        })
+        .unwrap()
+}
+
+#[test]
+#[ignore = "requires GPU (Linux)"]
+fn repeated_lines_parses_do_not_grow_host_memory() {
+    let record = read_fixture("twitter_sample_small_records.json");
+    let mut input = Vec::new();
+    while input.len() < 16 << 20 {
+        input.extend_from_slice(&record);
+    }
+    let opts = cujson::LinesOptions {
+        chunk_bytes: 2 << 20,
+    };
+    for _ in 0..3 {
+        drop(cujson::parse_lines(&input, opts).expect("GPU parse"));
+    }
+    let before = rss_kb();
+    for _ in 0..30 {
+        drop(cujson::parse_lines(&input, opts).expect("GPU parse"));
+    }
+    let grown_mb = rss_kb().saturating_sub(before) / 1024;
+    // Each parse's tape is tens of MB; leaking it 30 times is well over this.
+    assert!(grown_mb < 100, "RSS grew {grown_mb} MB over 30 parses");
+}
