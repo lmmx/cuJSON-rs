@@ -202,7 +202,9 @@ pub fn parse_file(path: impl AsRef<Path>) -> Result<Document<'static>, Error> {
 
 /// Let up to `n` parses run on the GPU at once (default 1). Parses from
 /// different threads then overlap: one's input copy with another's kernels
-/// and tape copy back. Each in-flight parse needs its own device memory.
+/// and tape copy back. Each in-flight parse needs its own device memory, and
+/// the pinned tape cache is resized to keep `n + 2` buffers (`n` being built,
+/// one queued, one being read), so a pipeline stops allocating pinned memory.
 /// No-op without the `cuda` feature.
 pub fn set_max_concurrent_parses(n: usize) {
     #[cfg(feature = "cuda")]
@@ -211,10 +213,11 @@ pub fn set_max_concurrent_parses(n: usize) {
     let _ = n;
 }
 
-/// Release the pinned host buffer kept for the next parse. After a parse,
-/// dropping its `Document` keeps at most one tape buffer (the largest
-/// recent one) pinned so the next parse skips `cudaMallocHost`; call this
-/// to give that memory back. No-op without the `cuda` feature.
+/// Release the pinned host buffers kept for later parses. After a parse,
+/// dropping its `Document` keeps the tape's pinned buffer for reuse, up to a
+/// limit of one buffer by default ([`set_max_concurrent_parses`] raises it to
+/// `n + 2`), so the next parse skips `cudaMallocHost`; call this to give that
+/// memory back. No-op without the `cuda` feature.
 pub fn trim_pinned_cache() {
     #[cfg(feature = "cuda")]
     unsafe {

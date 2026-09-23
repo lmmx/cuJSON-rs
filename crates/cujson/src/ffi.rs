@@ -24,6 +24,8 @@ static SLOT_FREED: Condvar = Condvar::new();
 
 pub(crate) fn set_max_concurrent(n: usize) {
     MAX_CONCURRENT.store(n.max(1), Ordering::Relaxed);
+    // `n` tapes being built, one queued and one being read by a consumer.
+    unsafe { sys::cujson_pinned_cache_set_limit(n.max(1) + 2) };
     SLOT_FREED.notify_all();
 }
 
