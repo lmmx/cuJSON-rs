@@ -4,7 +4,9 @@
 //! commutatively because `simd_json`'s object iteration order is not the
 //! document order.
 
-use cujson::tape::{Kind, Node};
+use std::borrow::Cow;
+
+use cujson::tape::{Kind, Node, Visitor};
 use simd_json::{BorrowedValue as V, StaticNode as S};
 
 const TAG_NULL: u64 = 0x11;
@@ -97,6 +99,94 @@ pub fn walk_cujson(n: Node<'_>) -> u64 {
     }
 }
 
+struct Frame {
+    obj: bool,
+    acc: u64,
+    len: u64,
+    key: u64,
+}
+
+/// Same checksum as `walk_cujson`, computed from `Document::visit` events.
+#[derive(Default)]
+pub struct HashVisitor {
+    stack: Vec<Frame>,
+    pub rows: u64,
+    pub hash: u64,
+}
+
+impl HashVisitor {
+    fn feed(&mut self, h: u64) {
+        match self.stack.last_mut() {
+            Some(f) if f.obj => {
+                f.acc = f.acc.wrapping_add(mix(f.key, h));
+                f.len += 1;
+            }
+            Some(f) => {
+                f.acc = mix(f.acc, h);
+                f.len += 1;
+            }
+            None => {
+                self.hash = self.hash.wrapping_add(h);
+                self.rows += 1;
+            }
+        }
+    }
+
+    fn end(&mut self) {
+        let f = self.stack.pop().expect("balanced");
+        let h = if f.obj {
+            mix(mix(TAG_OBJ, f.len), f.acc)
+        } else {
+            mix(f.acc, f.len)
+        };
+        self.feed(h);
+    }
+}
+
+impl Visitor for HashVisitor {
+    fn begin_object(&mut self) {
+        self.stack.push(Frame {
+            obj: true,
+            acc: 0,
+            len: 0,
+            key: 0,
+        });
+    }
+    fn begin_array(&mut self) {
+        self.stack.push(Frame {
+            obj: false,
+            acc: TAG_ARR,
+            len: 0,
+            key: 0,
+        });
+    }
+    fn end_object(&mut self) {
+        self.end();
+    }
+    fn end_array(&mut self) {
+        self.end();
+    }
+    fn key(&mut self, key: Cow<'_, str>) {
+        self.stack.last_mut().expect("key in object").key = hash_bytes(key.as_bytes());
+    }
+    fn string(&mut self, value: Cow<'_, str>) {
+        self.feed(mix(TAG_STR, hash_bytes(value.as_bytes())));
+    }
+    fn number(&mut self, raw: &[u8]) {
+        let s = std::str::from_utf8(raw).expect("utf8 number");
+        self.feed(match s.parse::<i64>() {
+            Ok(i) => int(i),
+            Err(_) => float(s.parse().expect("number")),
+        });
+    }
+    fn boolean(&mut self, value: bool) {
+        self.feed(mix(TAG_BOOL, value as u64));
+    }
+    fn null(&mut self) {
+        self.feed(TAG_NULL);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +209,15 @@ mod tests {
         ] {
             agree(j);
         }
+    }
+
+    #[test]
+    fn visitor_checksum_matches_node_walk() {
+        let j = r#"{"a":[1,2.5,-0,1e2,true,null,"é\n"],"b":{"c":[],"d":{}},"":[[1],[]]}"#;
+        let d = cujson::cpu::parse(j.as_bytes(), cujson::cpu::Mode::Standard).unwrap();
+        let mut v = HashVisitor::default();
+        d.visit(&mut v).unwrap();
+        assert_eq!((v.rows, v.hash), (1, walk_cujson(d.root())));
     }
 
     #[test]

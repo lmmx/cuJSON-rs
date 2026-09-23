@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use simd_json::Buffers;
 
 use crate::data::Batch;
-use crate::walk::{walk_cujson, walk_simd};
+use crate::walk::{HashVisitor, walk_cujson, walk_simd};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
 pub enum Engine {
@@ -23,11 +23,15 @@ pub enum Engine {
     CujsonPar,
     /// cuJSON's CPU-reference tape builder, one-thread tape walk (isolates the walk from the GPU)
     CujsonRef,
+    /// cuJSON GPU parse, single-pass `Document::visit`
+    CujsonLin,
+    /// CPU-reference tape, single-pass `Document::visit`
+    CujsonRefLin,
 }
 
 impl Engine {
     pub fn is_gpu(self) -> bool {
-        matches!(self, Engine::Cujson | Engine::CujsonPar)
+        matches!(self, Engine::Cujson | Engine::CujsonPar | Engine::CujsonLin)
     }
 }
 
@@ -60,7 +64,11 @@ pub fn run_batch(engine: Engine, level: Level, batch: &Batch) -> Result<Run, Str
         Engine::Simd | Engine::SimdPar | Engine::SimdBuf | Engine::SimdBufPar => {
             Ok(run_simd(engine, level, batch))
         }
-        Engine::Cujson | Engine::CujsonPar | Engine::CujsonRef => run_cujson(engine, level, batch),
+        Engine::Cujson
+        | Engine::CujsonPar
+        | Engine::CujsonRef
+        | Engine::CujsonLin
+        | Engine::CujsonRefLin => run_cujson(engine, level, batch),
     }
 }
 
@@ -112,18 +120,15 @@ fn run_simd(engine: Engine, level: Level, batch: &Batch) -> Run {
 
 fn run_cujson(engine: Engine, level: Level, batch: &Batch) -> Result<Run, String> {
     let t = Instant::now();
-    let doc = if engine == Engine::CujsonRef {
+    let cpu = matches!(engine, Engine::CujsonRef | Engine::CujsonRefLin);
+    let doc = if cpu {
         cujson::cpu::parse(&batch.bytes, cujson::cpu::Mode::Lines).map_err(|e| e.to_string())?
     } else {
         cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
             .map_err(|e| e.to_string())?
     };
     let parse = t.elapsed();
-    let parse_name = if engine == Engine::CujsonRef {
-        "cpu tape build"
-    } else {
-        "gpu parse"
-    };
+    let parse_name = if cpu { "cpu tape build" } else { "gpu parse" };
     if level == Level::Parse {
         let t = Instant::now();
         drop(black_box(doc));
@@ -134,7 +139,11 @@ fn run_cujson(engine: Engine, level: Level, batch: &Batch) -> Result<Run, String
         });
     }
     let t = Instant::now();
-    let (rows, hash) = if engine == Engine::CujsonPar {
+    let (rows, hash) = if matches!(engine, Engine::CujsonLin | Engine::CujsonRefLin) {
+        let mut v = HashVisitor::default();
+        doc.visit(&mut v).map_err(|e| e.to_string())?;
+        (v.rows, v.hash)
+    } else if engine == Engine::CujsonPar {
         let nodes: Vec<_> = doc.lines().collect();
         nodes
             .par_iter()
