@@ -17,12 +17,11 @@ Rust implementation of cuJSON: A Highly Parallel JSON Parser for GPUs (ASPLOS â€
 `.github/workflows/release.yml` runs on `v*.*.*` tags and on manual `workflow_dispatch` (with a
 `dry_run` input, default `true`, that builds everything but publishes nothing):
 
-- `cli`: builds `cujson-cli --features cuda` per CUDA major (12, 13) and packages
-  `cujson-cu{12,13}-x86_64-unknown-linux-gnu.tar.gz`, asserting no dynamic `libcudart` via `ldd`.
-- `wheel`: builds the Python wheel per CUDA major inside a `manylinux_2_28` container with the
+- `cli`: builds `cujson-cli --features cuda` with CUDA 13 and packages
+  `cujson-cu13-x86_64-unknown-linux-gnu.tar.gz`, asserting no dynamic `libcudart` via `ldd`.
+- `wheel`: builds the CUDA 13 Python wheel inside a `manylinux_2_28` container with the
   CUDA toolkit installed from NVIDIA's RHEL8 package repo (the `nvidia/cuda` Ubuntu images only
-  yield `manylinux_2_35` wheels), publishing the CUDA 13 build as `cujson` and the CUDA 12 build as
-  `cujson-cu12`, and
+  yield `manylinux_2_35` wheels), and
   checking with `auditwheel show` that no CUDA shared library other than `libcuda` (which is
   dlopen'd by the driver at runtime, never bundled) appears in the wheel.
 - `crate-package-check`: lists and size-checks the `cujson-sys` `.crate` (crates.io's 10 MB
@@ -32,7 +31,7 @@ Rust implementation of cuJSON: A Highly Parallel JSON Parser for GPUs (ASPLOS â€
   `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run` â€”
   a manual dispatch never publishes.
 
-Release artifacts: `cujson` (CUDA 13) and `cujson-cu12` (CUDA 12) Python wheels, `cujson-cu{12,13}-*.tar.gz` CLI
-tarballs, and the `cujson-sys`/`cujson` crates on crates.io. No source distribution is published
-for the Python packages (a source build needs `nvcc`); such users should depend on the
-Rust crate directly.
+Release artifacts: the `cujson` Python wheel and a `cujson-cu13-*.tar.gz` CLI tarball, both
+built with CUDA 13, and the `cujson-sys`/`cujson` crates on crates.io. On CUDA 12, build from a
+checkout instead: `pip install ./crates/cujson-py` or `cargo build --release -p cujson-cli
+--features cuda` (with CUDA 12's `nvcc` on `PATH`).
