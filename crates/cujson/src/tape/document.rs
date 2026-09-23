@@ -5,6 +5,9 @@ use std::borrow::Cow;
 use super::error::Error;
 use super::storage::Tape;
 
+#[cfg(test)]
+use super::storage::TapeStorage;
+
 /// The kind of JSON value a `Node` represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -179,16 +182,14 @@ fn children_iter<'a>(
     close: usize,
 ) -> impl Iterator<Item = Node<'a>> + 'a {
     let mut delim = open;
-    let mut started = false;
+    // A tape-adjacent open/close (no comma between them) is ambiguous: it
+    // means either an empty container or a single scalar with no comma
+    // (e.g. `[null]` has no comma structural entry either). Disambiguate on
+    // actual byte content instead of tape-index adjacency.
+    let mut empty = doc.scalar_bytes(open, close).is_empty();
     std::iter::from_fn(move || {
-        if !started {
-            started = true;
-            if open + 1 == close {
-                delim = close;
-                return None;
-            }
-        }
-        if delim == close {
+        if empty || delim == close {
+            empty = true;
             return None;
         }
         let node = doc.read_value(delim);
@@ -206,16 +207,10 @@ fn object_pairs<'a>(
     close: usize,
 ) -> impl Iterator<Item = (Cow<'a, str>, Node<'a>)> + 'a {
     let mut delim = open;
-    let mut started = false;
+    let mut empty = doc.scalar_bytes(open, close).is_empty();
     std::iter::from_fn(move || {
-        if !started {
-            started = true;
-            if open + 1 == close {
-                delim = close;
-                return None;
-            }
-        }
-        if delim == close {
+        if empty || delim == close {
+            empty = true;
             return None;
         }
         let colon_idx = delim + 1;
@@ -329,6 +324,11 @@ impl<'d> Node<'d> {
     /// Number of children, for object/array nodes only.
     pub fn len(&self) -> Option<usize> {
         match self.repr {
+            NodeRepr::Container {
+                open,
+                close,
+                kind: Kind::Object,
+            } => Some(object_pairs(self.doc, open, close).count()),
             NodeRepr::Container { open, close, .. } => {
                 Some(children_iter(self.doc, open, close).count())
             }
@@ -446,8 +446,30 @@ impl<'d> Node<'d> {
             Kind::Null => Value::Null,
             Kind::Bool => Value::Bool(self.as_bool().unwrap_or(false)),
             Kind::Number => {
+                // Parse with std's `f64`/`i64` parsers rather than
+                // `serde_json::from_str`: serde_json's own float lexer can
+                // be off by one ULP for some inputs, which broke exact
+                // round-tripping in the property tests.
                 let raw = std::str::from_utf8(self.raw()).unwrap_or("0");
-                serde_json::from_str(raw).unwrap_or(Value::Null)
+                if !raw.contains(['.', 'e', 'E']) {
+                    if let Ok(i) = raw.parse::<i64>() {
+                        Value::Number(i.into())
+                    } else if let Ok(u) = raw.parse::<u64>() {
+                        Value::Number(u.into())
+                    } else {
+                        raw.parse::<f64>()
+                            .ok()
+                            .and_then(serde_json::Number::from_f64)
+                            .map(Value::Number)
+                            .unwrap_or(Value::Null)
+                    }
+                } else {
+                    raw.parse::<f64>()
+                        .ok()
+                        .and_then(serde_json::Number::from_f64)
+                        .map(Value::Number)
+                        .unwrap_or(Value::Null)
+                }
             }
             Kind::String => {
                 Value::String(self.as_str().map(|c| c.into_owned()).unwrap_or_default())
@@ -460,5 +482,90 @@ impl<'d> Node<'d> {
                     .collect(),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hand-written tape for `{"a":1,"b":[2,3]}`, worked out by hand from
+    /// `tape/FORMAT.md` §1-3 rather than produced by `build_tape_cpu`, so
+    /// these tests exercise the navigator independently of the builder.
+    fn small_object_doc() -> Document<'static> {
+        let input: &'static [u8] = b"{\"a\":1,\"b\":[2,3]}";
+        // real structural bytes (1-based): { : , : [ , ]  }
+        //                        offset:   1 5 7 11 12 14 16 17
+        let structural = vec![0, 1, 5, 7, 11, 12, 14, 16, 17, 9];
+        let mut pair_pos = vec![-1i32; 10];
+        pair_pos[0] = 9;
+        pair_pos[9] = 0;
+        pair_pos[1] = 8; // '{' (tape idx 1) pairs with '}' (tape idx 8)
+        pair_pos[5] = 7; // '[' (tape idx 5) pairs with ']' (tape idx 7)
+        let tape = Tape {
+            structural: TapeStorage::from(structural),
+            pair_pos: TapeStorage::from(pair_pos),
+            depth: 2,
+        };
+        Document::new(Cow::Borrowed(input), tape)
+    }
+
+    #[test]
+    fn root_is_object() {
+        let doc = small_object_doc();
+        assert_eq!(doc.root().kind(), Kind::Object);
+        assert_eq!(doc.root().len(), Some(2));
+    }
+
+    #[test]
+    fn get_scalar_field() {
+        let doc = small_object_doc();
+        let a = doc.root().get("a").unwrap();
+        assert_eq!(a.kind(), Kind::Number);
+        assert_eq!(a.as_i64(), Ok(1));
+    }
+
+    #[test]
+    fn get_array_field_and_index() {
+        let doc = small_object_doc();
+        let b = doc.root().get("b").unwrap();
+        assert_eq!(b.kind(), Kind::Array);
+        assert_eq!(b.len(), Some(2));
+        assert_eq!(b.index(0).unwrap().as_i64(), Ok(2));
+        assert_eq!(b.index(1).unwrap().as_i64(), Ok(3));
+        assert!(b.index(2).is_none());
+    }
+
+    #[test]
+    fn missing_key_is_none() {
+        let doc = small_object_doc();
+        assert!(doc.root().get("nope").is_none());
+    }
+
+    #[test]
+    fn pointer_navigates_nested_array() {
+        let doc = small_object_doc();
+        assert_eq!(doc.pointer("/b/1").unwrap().as_i64(), Ok(3));
+        assert_eq!(doc.pointer("").unwrap().kind(), Kind::Object);
+        assert!(doc.pointer("/does/not/exist").is_none());
+    }
+
+    #[test]
+    fn string_unescaping() {
+        // {"k":"a\nbA\"c"} — the string value contains the two-character
+        // escapes \n and \" literally (not a real newline byte).
+        let input: &'static [u8] = br#"{"k":"a\nbA\"c"}"#;
+        // structural bytes (1-based offsets): { at 1, : at 5, } at 16
+        let structural = vec![0, 1, 5, 16, 4];
+        let pair_pos = vec![4, 3, -1, -1, 0];
+        let tape = Tape {
+            structural: TapeStorage::from(structural),
+            pair_pos: TapeStorage::from(pair_pos),
+            depth: 1,
+        };
+        let doc = Document::new(Cow::Borrowed(input), tape);
+        let v = doc.root().get("k").unwrap();
+        assert_eq!(v.kind(), Kind::String);
+        assert_eq!(v.as_str().unwrap(), "a\nbA\"c");
     }
 }
