@@ -1,6 +1,6 @@
 # 2026-09-23: mistral.rs Packaging Survey
 
-Reference checkouts: mistral.rs at `ccd265973` (`/mnt/mistral.rs`), cuJSON at `d330662`
+Reference checkouts: mistral.rs at `ccd265973` (`/mnt/mistral.rs`), cuJSON at `38d27b6` (upstream HEAD 2026-09-10; `vendor/cuJSON` has no .git, identity checked by diff against a fresh clone)
 (`vendor/cuJSON`, gitignored), cudaforge 0.1.6 (cargo registry source).
 
 ## Current State

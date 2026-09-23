@@ -20,7 +20,7 @@ These apply to every task. A brief that needs to deviate says so explicitly.
 |---|---|
 | Layout | Cargo workspace; crates under `crates/`: `cujson-sys`, `cujson`, `cujson-cli` (binary `cujson`), `cujson-py` (Python module `cujson`) |
 | Edition / MSRV | edition 2024, `rust-version = "1.85"` |
-| Upstream source | cuJSON `cujson/` copied into `crates/cujson-sys/cuda/upstream/` from commit `d330662`, with its MIT LICENSE and an `UPSTREAM.md` naming the commit. `vendor/` is a read-only reference and will be deleted — nothing may build from or link to it |
+| Upstream source | cuJSON `cujson/` copied into `crates/cujson-sys/cuda/upstream/` from upstream commit `38d27b6e6c4eb74205cf59f4123b0983034405e2`, with its MIT LICENSE and an `UPSTREAM.md` naming the commit. `vendor/` is a read-only reference and will be deleted — nothing may build from or link to it |
 | Upstream patches | Applied to the copied sources as separate commits after a pristine-import commit, so `git diff <import-commit> -- crates/cujson-sys/cuda/upstream` shows every change to upstream |
 | Kernel build | `cudaforge` build-dependency behind `cujson-sys`'s `cuda` feature (same pattern as mistralrs-paged-attn). Without `cuda`, `build.rs` does nothing and needs no nvcc |
 | GPU architectures | One fat binary per CUDA major, not one build per SM. Default arch list lives in one constant in `build.rs`; `CUJSON_CUDA_ARCHS` env var overrides it (e.g. `CUJSON_CUDA_ARCHS=89` for a fast local build). CUDA 12: SASS for 75,80,86,89,90 plus PTX for 90. CUDA 13: SASS for 75,80,86,89,90,100,120 plus PTX for 120 |
@@ -49,11 +49,14 @@ and can run as parallel agents in separate git worktrees. 07, 08 and 09 can run 
 
 ## Verification tiers
 
-This container has no GPU and no CUDA toolkit. Every brief states which tier its
+This container has no GPU. It does have a CUDA 12.8 compile toolchain (nvcc, static
+cudart, Thrust/CUB) unpacked from NVIDIA's redist tarballs into `/workspace/.cuda/12.8`,
+plus a uv venv with maturin and pytest. Run `. /workspace/.cuda/env.sh` first; it sets
+`RUSTUP_HOME`, `CARGO_HOME`, `CUDA_HOME` and `PATH`. Every brief states which tier its
 acceptance criteria reach:
 
-1. **Here:** `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace` without `cuda`
-2. **CI compile check (no GPU):** `cargo build --features cuda` inside `nvidia/cuda:*-devel` containers (task 09). A GPU is not needed to compile or link
+1. **No CUDA:** `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace` without `cuda`
+2. **Compile + link with CUDA (no GPU), available here and in CI:** `cargo build --features cuda`, plus `cargo test --features cuda` for tests that don't touch the GPU. Briefs 02–04 that say "none here" / "tier 2 via task 09" can reach tier 2 locally. Unmodified upstream `main.cu` was compiled and linked this way (nvcc 12.8, sm_80), and the result had no CUDA shared-library dependencies
 3. **GPU box (user):** anything that runs a kernel, following task 10's runbook
 
 GPU-dependent tests are `#[ignore = "requires GPU"]` so tier 1 stays green, and run on the

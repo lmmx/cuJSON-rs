@@ -12,7 +12,7 @@ Depends on: nothing. Verification tier: 1.
   - `crates/cujson-cli` (bin named `cujson`)
   - `crates/cujson-py` is **not** created here (task 08)
 - Pristine copy of `vendor/cuJSON/cujson/` → `crates/cujson-sys/cuda/upstream/`, byte-identical, in its own commit
-- `crates/cujson-sys/cuda/upstream/LICENSE` (copied from `vendor/cuJSON/LICENSE`) and `UPSTREAM.md` naming repo URL, commit `d330662`, and the rule that local changes land as separate commits
+- `crates/cujson-sys/cuda/upstream/LICENSE` (copied from `vendor/cuJSON/LICENSE`) and `UPSTREAM.md` naming repo URL, commit `38d27b6e6c4eb74205cf59f4123b0983034405e2`, and the rule that local changes land as separate commits
 - Test fixtures: copy `vendor/cuJSON/dataset/twitter_sample_large_record.json` and `twitter_sample_small_records.json` to `tests/fixtures/` at the workspace root, with a `tests/fixtures/README.md` noting their origin
 - `.gitignore` gains `target/`
 
