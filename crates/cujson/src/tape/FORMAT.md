@@ -206,14 +206,25 @@ Per chunk `i`, `resultSizes[i]` is that chunk's structural-entry count and
 structural row into one buffer at `resultBuffer[1 + start_pos ..]` where `start_pos =
 resultSizesPrefix[i-1]` (`0` for `i == 0`, `:1088-1089,1092`), and every chunk's pair_pos
 row into `resultBuffer[1 + start_pos + resultSizesPrefix[last] + 1 ..]` (`:1094`). This
-reproduces the single-document layout — one leading artificial `0`, the concatenated
-structural offsets, then (after the same `resultSizesPrefix[last] + 1` gap used for the
+reproduces the single-document layout of real entries — the concatenated structural
+offsets, then (after the same `resultSizesPrefix[last] + 1` gap used for the
 single-document `pair_pos` offset) the concatenated pair_pos values — over the whole
 multi-chunk tape, with **no artificial trailing close appended per chunk**: chunk
 boundaries are visible only through `resultSizesPrefix`, not through extra tape entries.
 Because both the structural offsets (`lastChunkIndex`, confirmed above) and the pair_pos
 values (`lastStructuralIndex`, confirmed above) are already in final tape-index/byte-space
 before `mergeChunks` runs, `mergeChunks` does pure concatenation — no renumbering.
+
+**`mergeChunks` never writes the two artificial wrapper entries.** `resultBuffer[0]`
+(`structural[0]`) and `resultBuffer[N+1]` (`structural[len-1]`, the same int32 as
+`pair_pos[0]`) are left as whatever the non-zeroing `cudaMallocHost` returned
+(`parse_json_lines.cu:1093-1113`); upstream's iterator constructor writes them itself
+(`query_iterator_standard_json.cpp:92,95,97`). An earlier revision of this document said
+`mergeChunks` wrote a leading artificial `0` — the first GPU run (RTX 3090, 2026-09-23)
+refuted that, reading `structural[len-1] = 0` on a fresh allocation and `structural[0] =
+2119` on a reused one. The C ABI shim therefore writes `structural[0] = 0` and
+`structural[len-1] = len-1` after `parse_json_lines` returns (`capi_lines.cu`), matching
+Standard mode (§2), so the tape the Rust crate receives is fully defined in both modes.
 
 `totalResultSize = total_result_size + 2` and `fileSize = lastStructuralIndex + 2`
 (`parse_json_lines.cu:1262-1263`) are equal here (`lastStructuralIndex` ends at

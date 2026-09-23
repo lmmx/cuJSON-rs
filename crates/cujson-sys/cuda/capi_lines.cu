@@ -83,6 +83,13 @@ extern "C" cujson_status cujson_parse_lines(const uint8_t* data, size_t size, si
         return CUJSON_ERR_INTERNAL;
     }
 
+    // mergeChunks leaves both artificial wrapper entries unwritten in its
+    // uninitialised pinned buffer. Write them as parse_standard_json does
+    // (FORMAT.md §2), so both modes return a fully defined tape. The last
+    // entry is also pair_pos[0].
+    const size_t n = static_cast<size_t>(result.totalResultSize);
+    result.structural[0] = 0;
+    result.structural[n - 1] = static_cast<int32_t>(n - 1);
 
     out->structural = result.structural;
     out->pair_pos = result.pair_pos;
