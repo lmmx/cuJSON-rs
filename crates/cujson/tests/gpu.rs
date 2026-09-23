@@ -252,3 +252,29 @@ fn repeated_lines_parses_do_not_grow_host_memory() {
     // Each parse's tape is tens of MB; leaking it 30 times is well over this.
     assert!(grown_mb < 100, "RSS grew {grown_mb} MB over 30 parses");
 }
+
+/// Tapes parsed from a recycled pinned buffer must equal the CPU reference,
+/// with two documents alive at once, across a `trim_pinned_cache` call.
+#[test]
+#[ignore = "requires GPU"]
+fn pinned_buffer_reuse_keeps_tapes_correct() {
+    let _serial = serial();
+    let std_bytes = read_fixture("twitter_sample_large_record.json");
+    let lines_bytes = read_fixture("twitter_sample_small_records.json");
+    let std_cpu = cpu::parse(&std_bytes, Mode::Standard).unwrap();
+    let lines_cpu = cpu::parse(&lines_bytes, Mode::Lines).unwrap();
+    for round in 0..4 {
+        let a = cujson::parse(&std_bytes).expect("GPU parse");
+        let b = cujson::parse_lines(&lines_bytes, cujson::LinesOptions::default())
+            .expect("GPU parse_lines");
+        let da = diff_tapes(&std_bytes, &a.tape, &std_cpu.tape);
+        assert!(da.is_none(), "round {round}: {}", da.unwrap());
+        let db = diff_tapes(&lines_bytes, &b.tape, &lines_cpu.tape);
+        assert!(db.is_none(), "round {round}: {}", db.unwrap());
+        drop(a);
+        drop(b);
+        if round == 1 {
+            cujson::trim_pinned_cache();
+        }
+    }
+}
