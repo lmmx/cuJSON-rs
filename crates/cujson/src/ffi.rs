@@ -173,6 +173,26 @@ pub(crate) fn cuda_info() -> Result<CudaInfo, Error> {
     })
 }
 
+/// No `device_available()` gate — safe to call after a failed
+/// `cuda_info()`/`parse*` to help build a hint message (see
+/// `crate::driver_version`'s doc comment).
+pub(crate) fn driver_version() -> i32 {
+    let _guard = lock();
+    unsafe { sys::cujson_cuda_driver_version() }
+}
+
+pub(crate) fn runtime_version() -> Result<i32, Error> {
+    let _guard = lock();
+    let version = unsafe { sys::cujson_cuda_runtime_version() };
+    if version < 0 {
+        return Err(Error::Cuda {
+            code: -version,
+            message: cuda_error_string(-version),
+        });
+    }
+    Ok(version)
+}
+
 pub(crate) fn mem_get_info() -> Result<(usize, usize), Error> {
     let _guard = lock();
     device_available()?;

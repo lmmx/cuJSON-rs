@@ -156,6 +156,48 @@ impl From<std::io::Error> for CliError {
     }
 }
 
+/// Plain-words hint for a `cujson::Error` from `cuda_info()`/`parse*`,
+/// beyond the error's own `Display` — the specific cases a user hits on a
+/// real GPU host: no driver at all, a driver too old for this binary's
+/// CUDA runtime, or a driver with no device visible. `None` when the
+/// error doesn't warrant an extra hint (unrecognized code, or CUDA not
+/// compiled in — already self-explanatory).
+#[cfg(feature = "cuda")]
+pub(crate) fn cuda_error_hint(err: &cujson::Error) -> Option<String> {
+    let code = match err {
+        cujson::Error::Cuda { code, .. } => *code,
+        cujson::Error::NoDevice => {
+            return Some(
+                "driver present but no CUDA device visible (check CUDA_VISIBLE_DEVICES / container GPU passthrough)"
+                    .to_string(),
+            );
+        }
+        _ => return None,
+    };
+    match code {
+        35 => {
+            let driver = cujson::driver_version();
+            if driver == 0 {
+                Some("no NVIDIA driver found".to_string())
+            } else {
+                let runtime = cujson::runtime_version().unwrap_or(0);
+                Some(format!(
+                    "driver supports CUDA {}.{} but this binary was built with CUDA runtime {}.{}; update the driver or rebuild with an older toolkit",
+                    driver / 1000,
+                    (driver % 1000) / 10,
+                    runtime / 1000,
+                    (runtime % 1000) / 10,
+                ))
+            }
+        }
+        100 => Some(
+            "driver present but no CUDA device visible (check CUDA_VISIBLE_DEVICES / container GPU passthrough)"
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
 fn cmd_info() -> Result<(), CliError> {
     #[cfg(not(feature = "cuda"))]
     {
@@ -164,10 +206,19 @@ fn cmd_info() -> Result<(), CliError> {
     }
     #[cfg(feature = "cuda")]
     {
-        let info = cujson::cuda_info()?;
+        let info = match cujson::cuda_info() {
+            Ok(i) => i,
+            Err(e) => {
+                if let Some(hint) = cuda_error_hint(&e) {
+                    eprintln!("{hint}");
+                }
+                return Err(e.into());
+            }
+        };
         println!("cuJSON-rs {}", env!("CARGO_PKG_VERSION"));
         println!("compiled archs: {}", info.compiled_archs);
         println!("CUDA runtime version: {}", info.runtime_version);
+        println!("CUDA driver version: {}", info.driver_version);
         if info.devices.is_empty() {
             println!("no CUDA devices visible");
         } else {

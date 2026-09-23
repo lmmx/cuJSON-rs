@@ -187,6 +187,40 @@ pub fn cuda_info() -> Result<CudaInfo, Error> {
     }
 }
 
+/// The driver's supported CUDA version (`cudaDriverGetVersion`'s
+/// encoding), or `0` if no driver responds. Unlike [`cuda_info`], this
+/// never errors on a driverless/deviceless host — it's meant to be called
+/// *after* [`cuda_info`] or a `parse*` call has already failed, so a
+/// caller (e.g. `cujson verify`) can distinguish "no driver at all"
+/// (`driver_version() == 0`) from "driver present but too old for this
+/// binary's CUDA runtime" (`driver_version() > 0` but below
+/// `CudaInfo::runtime_version`) when building a hint message.
+pub fn driver_version() -> i32 {
+    #[cfg(feature = "cuda")]
+    {
+        ffi::driver_version()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        0
+    }
+}
+
+/// The CUDA runtime version this binary was built against
+/// (`cudaRuntimeGetVersion`'s encoding), independent of whether a device
+/// or driver is present — pairs with [`driver_version`] to build a hint
+/// message when [`cuda_info`] fails.
+pub fn runtime_version() -> Result<i32, Error> {
+    #[cfg(feature = "cuda")]
+    {
+        ffi::runtime_version()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        Err(Error::CudaNotCompiled)
+    }
+}
+
 /// Free/total device memory in bytes (`cudaMemGetInfo`, after a
 /// `cudaDeviceSynchronize`). Used by `cujson verify`'s memory-growth
 /// heuristic (task 07); not called by `parse`/`parse_lines`.

@@ -51,13 +51,21 @@ pub fn run(file: Option<PathBuf>, lines: bool, chunk_bytes: Option<usize>) -> Ex
             Ok(i) => i,
             Err(e) => {
                 eprintln!("CUDA unavailable: {e}");
+                if let Some(hint) = crate::cuda_error_hint(&e) {
+                    eprintln!("{hint}");
+                }
                 return ExitCode::from(2);
             }
         };
         println!("CUDA runtime version: {}", info.runtime_version);
+        println!("CUDA driver version: {}", info.driver_version);
         println!("compiled archs: {}", info.compiled_archs);
         if info.devices.is_empty() {
             eprintln!("CUDA unavailable: no devices visible");
+            eprintln!(
+                "{}",
+                crate::cuda_error_hint(&cujson::Error::NoDevice).unwrap_or_default()
+            );
             return ExitCode::from(2);
         }
         for d in &info.devices {
