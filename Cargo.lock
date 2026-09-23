@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "cujson"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cujson-sys",
  "proptest",
@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "cujson-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "cujson-py"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cujson",
  "pyo3",
@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "cujson-sys"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cudaforge",
 ]
