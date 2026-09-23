@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <iomanip>
-#include <x86intrin.h>
 #include <string>
 #include <vector>
 #include <queue>

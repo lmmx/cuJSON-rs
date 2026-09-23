@@ -5,7 +5,6 @@
 #include <math.h>
 #include <chrono>
 #include <thread>
-#include <x86intrin.h>
 #include <string.h>
 #include <bitset>
 #include <thrust/sort.h>
