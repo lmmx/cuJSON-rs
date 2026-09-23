@@ -6,6 +6,7 @@
 #include "cujson_capi.h"
 #include "upstream/cujsonlines.h"
 #include "upstream/cujson_error.h"
+#include "lines_chunks.h"
 
 #include <cuda_runtime.h>
 #include <thrust/system_error.h>
@@ -15,48 +16,14 @@
 
 namespace {
 
-// Mirrors loadJSONLines_chunkSizeBytes (upstream/load_file.cu) but reads
-// from the caller's buffer directly instead of a file, and its chunks
-// point into that buffer instead of a second pinned-memory copy.
 void build_lines_chunks(const uint8_t* data, size_t size, size_t chunk_bytes, cuJSONLinesInput& input) {
     input.data = const_cast<uint8_t*>(data);
     input.size = size;
-
-    std::vector<size_t> line_offsets;
-    line_offsets.push_back(0);
-    for (size_t i = 0; i < size; ++i) {
-        if (data[i] == '\n') line_offsets.push_back(i + 1);
+    for (const cujson_capi::LinesChunk& c : cujson_capi::split_lines_chunks(data, size, chunk_bytes)) {
+        input.chunks.push_back(const_cast<uint8_t*>(data) + c.start);
+        input.chunksSize.push_back(c.size);
     }
-    if (line_offsets.back() < size) line_offsets.push_back(size);
-
-    size_t current_chunk_start = 0;
-    size_t current_offset = 0;
-    size_t chunk_count = 0;
-    for (size_t i = 1; i < line_offsets.size(); ++i) {
-        size_t line_start = line_offsets[i - 1];
-        size_t line_end = line_offsets[i];
-
-        // A line longer than chunk_bytes still gets a chunk to itself: the
-        // finalize-and-restart below always uses the line's own start, so a
-        // single oversized line just produces an oversized chunk here and
-        // starts fresh on the next line.
-        if ((line_end - current_chunk_start) > chunk_bytes) {
-            chunk_count++;
-            input.chunks.push_back(const_cast<uint8_t*>(data) + current_chunk_start);
-            input.chunksSize.push_back(current_offset - current_chunk_start);
-            current_chunk_start = line_start;
-        }
-
-        current_offset = line_end;
-    }
-
-    if (current_chunk_start < size) {
-        input.chunks.push_back(const_cast<uint8_t*>(data) + current_chunk_start);
-        input.chunksSize.push_back(size - current_chunk_start);
-        chunk_count++;
-    }
-
-    input.chunkCount = chunk_count;
+    input.chunkCount = input.chunks.size();
 }
 
 } // namespace
@@ -110,11 +77,12 @@ extern "C" cujson_status cujson_parse_lines(const uint8_t* data, size_t size, si
     }
 
     if (result.structural == nullptr) {
-        // parse_json_lines's own guard clauses return cuJSONResult{} without
-        // throwing; unreachable given the checks above and build_lines_chunks
-        // always producing well-formed chunk metadata, kept as a fallback.
+        // parse_json_lines's guard clauses return cuJSONResult{} without
+        // throwing, e.g. for a zero-size chunk; split_lines_chunks never
+        // produces one.
         return CUJSON_ERR_INTERNAL;
     }
+
 
     out->structural = result.structural;
     out->pair_pos = result.pair_pos;
