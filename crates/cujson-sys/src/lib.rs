@@ -65,4 +65,7 @@ unsafe extern "C" {
     pub fn cujson_device_count() -> c_int;
     pub fn cujson_device_name(device: c_int, buf: *mut c_char, buf_len: usize) -> cujson_status;
     pub fn cujson_compiled_archs() -> *const c_char;
+    pub fn cujson_cuda_error_string(err: c_int) -> *const c_char;
+    pub fn cujson_cuda_driver_version() -> c_int;
+    pub fn cujson_mem_get_info(free_bytes: *mut usize, total_bytes: *mut usize) -> cujson_status;
 }

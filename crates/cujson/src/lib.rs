@@ -91,6 +91,9 @@ pub struct CudaInfo {
     pub devices: Vec<DeviceInfo>,
     /// The build's `-DCUJSON_COMPILED_ARCHS` string, e.g. `"75,80,86,89,90;ptx90"`.
     pub compiled_archs: String,
+    /// The driver's supported CUDA version (`cudaDriverGetVersion`'s
+    /// encoding, same as `runtime_version`), or `0` if no driver responds.
+    pub driver_version: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +180,20 @@ pub fn cuda_info() -> Result<CudaInfo, Error> {
     #[cfg(feature = "cuda")]
     {
         ffi::cuda_info()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        Err(Error::CudaNotCompiled)
+    }
+}
+
+/// Free/total device memory in bytes (`cudaMemGetInfo`, after a
+/// `cudaDeviceSynchronize`). Used by `cujson verify`'s memory-growth
+/// heuristic (task 07); not called by `parse`/`parse_lines`.
+pub fn device_memory() -> Result<(usize, usize), Error> {
+    #[cfg(feature = "cuda")]
+    {
+        ffi::mem_get_info()
     }
     #[cfg(not(feature = "cuda"))]
     {
