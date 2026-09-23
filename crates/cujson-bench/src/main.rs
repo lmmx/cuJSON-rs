@@ -5,7 +5,7 @@ mod walk;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use engines::{Engine, Level, Tape, run_batch};
+use engines::{Engine, Level, Tape, run_batch, run_pipeline};
 
 #[derive(Parser)]
 struct Cli {
@@ -37,7 +37,7 @@ enum Cmd {
     Run {
         #[command(flatten)]
         input: Input,
-        #[arg(long, value_enum, value_delimiter = ',', default_values_t = [Engine::Simd, Engine::SimdPar, Engine::SimdBuf, Engine::SimdBufPar, Engine::CujsonNode, Engine::CujsonNodePar, Engine::CujsonVisit, Engine::CujsonVisitPar])]
+        #[arg(long, value_enum, value_delimiter = ',', default_values_t = [Engine::Simd, Engine::SimdPar, Engine::SimdBuf, Engine::SimdBufPar, Engine::CujsonNode, Engine::CujsonNodePar, Engine::CujsonVisit, Engine::CujsonVisitPar, Engine::CujsonPipe])]
         engines: Vec<Engine>,
         /// Tape source for the cujson-* engines
         #[arg(long, value_enum, default_value_t = Tape::Gpu)]
@@ -164,6 +164,9 @@ fn bench(
             continue;
         }
         for &level in levels {
+            if engine == Engine::CujsonPipe && level == Level::Parse {
+                continue;
+            }
             reset_peak_rss();
             let mut runs: Vec<Vec<f64>> = vec![];
             let mut names: Vec<&'static str> = vec![];
@@ -173,8 +176,17 @@ fn bench(
                 let mut phases: Vec<f64> = vec![];
                 let (mut r, mut h) = (0, 0u64);
                 let mut total = Duration::ZERO;
-                for b in &corpus.batches {
-                    match run_batch(engine, level, tape, b) {
+                let results: Vec<Result<engines::Run, String>> = if engine == Engine::CujsonPipe {
+                    vec![run_pipeline(&corpus.batches, tape)]
+                } else {
+                    corpus
+                        .batches
+                        .iter()
+                        .map(|b| run_batch(engine, level, tape, b))
+                        .collect()
+                };
+                for result in results {
+                    match result {
                         Ok(run) => {
                             if phases.is_empty() {
                                 phases = vec![0.0; run.phases.len()];
