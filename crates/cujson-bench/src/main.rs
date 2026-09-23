@@ -185,6 +185,17 @@ fn bench(
     );
     let baseline_kb = proc_kb("VmRSS:").unwrap_or(0);
     let mut reference: Vec<(Level, u64, u64)> = vec![];
+    if levels.contains(&Level::Walk) {
+        // Every walk result is checked against simd-json's, even when it is the only engine run.
+        let (mut r, mut h) = (0, 0u64);
+        for b in &corpus.batches {
+            let run =
+                run_batch(Engine::SimdPar, Level::Walk, tape, b).expect("simd-json reference");
+            r += run.rows;
+            h = h.wrapping_add(run.hash);
+        }
+        reference.push((Level::Walk, r, h));
+    }
 
     for &engine in engines {
         if engine.is_cujson()
