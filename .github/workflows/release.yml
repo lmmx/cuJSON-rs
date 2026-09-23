@@ -106,7 +106,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Install maturin
-        run: pip3.12 install maturin
+        run: pipx install maturin
 
       - name: Build wheel
         run: |
@@ -114,7 +114,7 @@ jobs:
           maturin build --release -m crates/cujson-py/Cargo.toml --out dist
 
       - name: Install auditwheel
-        run: pip3.12 install auditwheel
+        run: pipx install auditwheel
 
       - name: Assert no bundled CUDA libs other than libcuda
         run: |
