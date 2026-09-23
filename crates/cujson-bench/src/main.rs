@@ -52,6 +52,15 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Parse the same batch repeatedly, printing RSS and free GPU memory per iteration
+    Leak {
+        #[command(flatten)]
+        input: Input,
+        #[arg(long, value_enum, default_value_t = Engine::CujsonNode)]
+        engine: Engine,
+        #[arg(long, default_value_t = 30)]
+        iters: usize,
+    },
     /// Check that every engine produces the same per-row checksum
     Verify {
         #[command(flatten)]
@@ -109,6 +118,11 @@ fn main() {
             json,
         } => bench(&input, &engines, &levels, tape, reps, warmup, json),
         Cmd::Verify { input, rows } => verify(&input, rows),
+        Cmd::Leak {
+            input,
+            engine,
+            iters,
+        } => leak(&input, engine, iters),
     }
 }
 
@@ -297,4 +311,23 @@ fn verify(input: &Input, max_rows: usize) {
         sets[0].1.len(),
         sets.len()
     );
+}
+
+fn leak(input: &Input, engine: Engine, iters: usize) {
+    let corpus = load(input, None);
+    let batch = &corpus.batches[0];
+    let mb = |kb: u64| kb / 1024;
+    println!("iter  rss_mb  hwm_mb  gpu_free_mb");
+    for i in 0..iters {
+        if let Err(e) = run_batch(engine, Level::Parse, Tape::Gpu, batch) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        let free = cujson::device_memory().map_or(0, |(f, _)| f as u64 >> 20);
+        println!(
+            "{i:>4}  {:>6}  {:>6}  {free:>11}",
+            mb(proc_kb("VmRSS:").unwrap_or(0)),
+            mb(proc_kb("VmHWM:").unwrap_or(0)),
+        );
+    }
 }
