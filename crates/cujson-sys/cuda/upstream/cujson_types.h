@@ -29,7 +29,11 @@ struct cuJSONResult{
     int32_t* pair_pos;                      // ending idx of each opening in structural will store in that corresponding idx
     int depth;                              // max depth of JSON file
     int totalResultSize;                    // total size of our array | tree size
-    int fileSize;                           // JSON file size
+    int fileSize;                           // Not a byte count: parse_standard_json sets this to
+                                             // result_size + 2 (the structural token count, including
+                                             // the synthetic leading/trailing entries), and
+                                             // parse_json_lines sets it to lastStructuralIndex + 2 (the
+                                             // running total across chunks, same +2 convention).
 };
 
 enum tokens_type_enum { OBJECT,ARRAY,KEYVALUE,VALUE,CLOSING }; 
