@@ -19,6 +19,11 @@ struct LinesChunk {
 // chunk_bytes becomes a chunk on its own. Every chunk is non-empty, because
 // parse_json_lines rejects a zero-size chunk by returning an empty result.
 inline std::vector<LinesChunk> split_lines_chunks(const uint8_t* data, size_t size, size_t chunk_bytes) {
+    // Nothing splits an input that fits in one chunk; skip the pass over it.
+    if (size <= chunk_bytes) {
+        if (size == 0) return {};
+        return {{0, size}};
+    }
     std::vector<LinesChunk> chunks;
     size_t chunk_start = 0;
     size_t line_start = 0;

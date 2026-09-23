@@ -53,6 +53,20 @@ Version history: the leak fix (ed01209), the single-chunk copy (ce7ae93), the fi
 - Every test in `gpu.rs` holds a process-wide `serial()` guard for its duration, because several sample GPU-wide memory
 - `repeated_invalid_parses_do_not_grow_device_memory` makes one valid parse before it samples `nvidia-smi` memory: creating the CUDA context costs about 300 MB of device memory, which fell inside the measured window when the test ran alone (1,321 MB to 1,619 MB) or first (1,333 MB to 1,633 MB), and the test passed when run after other tests
 
+### Host-side chunking pass (branch `skip-chunk-scan`)
+
+- `cujson_parse_lines` calls `split_lines_chunks` (`lines_chunks.h`) before every parse; it walked the whole input with `memchr`, one call per line, to cut it into chunks of at most `chunk_bytes` (default 256 MiB), which is a pass over 33.5 MB for a 32 MB batch and always yields one chunk when the input is not larger than `chunk_bytes`
+- A host microbenchmark over 33.5 MB of 128,000-byte lines (hot cache, development machine) read 1.3 ms to 1.4 ms per call before the change and 0 ms after it
+- `split_lines_chunks` now returns `{{0, size}}` without scanning when `size <= chunk_bytes` (and no chunks for an empty input); the output for such inputs is the same as before, and `an_input_that_fits_in_one_chunk_is_one_chunk` in `crates/cujson-sys/tests/lines_chunks.rs` checks sizes at, above and one below the input length
+- The `nsys` profile of `master` at d094037 (`run --batch-mb 32 --pinned-input --engines cujson-visit-par --levels parse --reps 3 --warmup 1`) reads per 233 MB pass: GPU busy 31.2 ms (host-to-device copy 20.4 ms, device-to-host copy 8.0 ms, kernels 2.4 ms, memsets 0.4 ms), CUDA API time on the host about 35 ms (`cudaMemcpy` 29 ms, `cudaStreamSynchronize` 3.2 ms, launches 0.9 ms, `cudaMalloc` 0.6 ms) and `gpu parse` 45 ms, leaving 9 ms to 14 ms outside the CUDA API and outside GPU work
+
+### Timeline of one batch (`nsys stats -r cuda_gpu_trace`, master at d094037, 32 MB batches, pinned input, before the chunking fix)
+
+- Per steady-state batch of 33.5 MB: host-to-device copy 2.89 ms to 2.95 ms (11.3 to 11.6 GB/s), a chain of small memsets, `checkAscii`, `bitMapCreatorSimd`, scans, sorts and `validate_expand` kernels totalling about 0.64 ms with one 0.3 ms idle stretch after the first small device-to-host copies, then two device-to-host copies of 5.9 MB to 6.0 MB of 0.56 ms to 0.58 ms each (10.4 to 10.7 GB/s); GPU-side total about 4.75 ms
+- The gap between the end of one parse's last copy and the start of the next parse's first memset read 1.63 ms, which matches the 1.3 ms to 1.4 ms of the host chunking pass measured separately; 4.75 ms plus 1.63 ms is 6.4 ms per batch, 45 ms over seven batches, the `gpu parse` time of that run
+- After the chunking fix the same arithmetic gives about 5 ms per batch, 35 ms per file, and `gpu parse` reads 0.034 s to 0.038 s
+- `--gpu-threads` 1, 2 and 3 after the chunking fix: `cujson-pipe` 0.045 s, 0.046 s and 0.050 s with `parse busy` 0.039 s, 0.066 s and 0.107 s and `walk busy` 0.038 s to 0.039 s
+
 ## Profiles (`nsys profile --stats=true`, RTX 3090, PCIe link about 12 GB/s)
 
 - 256 MB batch, pageable input, before ce7ae93 (4 parses of 233 MB and one `{}` probe): per parse about 2 ms of kernels (`bitMapCreatorSimd` 0.55 ms, `extractStructuralIdx` 0.37 ms, `fusedStep3_4` 0.27 ms, `checkAscii` 0.27 ms), host-to-device copy 24.6 ms for 233.4 MB (9.5 GB/s), two `cudaHostAlloc` calls of about 17.5 ms, two `cudaFreeHost` calls of about 6.5 ms, two device-to-host copies of 41.4 MB at about 4 ms
