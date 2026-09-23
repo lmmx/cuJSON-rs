@@ -62,6 +62,45 @@ fn tape_cpu_lines_mode_on_tiny_input() {
         .stdout(predicate::str::starts_with("idx\toffset\tchar\tpair\n"));
 }
 
+#[test]
+fn tape_cpu_first_and_last_rows_are_brackets() {
+    // FORMAT.md §2 / Document::get_char: idx 0 and idx len-1 are the
+    // artificial wrapper entries, read as `[`/`]`, never `?`.
+    let dir = tempfile_dir();
+    let path = dir.join("brackets.json");
+    std::fs::write(&path, b"{\"a\":1}").unwrap();
+
+    let assert = cli()
+        .args(["tape", "--cpu", path.to_str().unwrap()])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let mut lines = stdout.lines();
+    lines.next(); // header
+    let first = lines.next().unwrap();
+    let last = stdout.lines().last().unwrap();
+    assert_eq!(first.split('\t').nth(2), Some("["), "first row: {first}");
+    assert_eq!(last.split('\t').nth(2), Some("]"), "last row: {last}");
+}
+
+#[cfg(unix)]
+#[test]
+fn tape_broken_pipe_on_stdout_exits_cleanly() {
+    // `cujson tape FILE | head` must not print "Broken pipe" and exit
+    // non-zero — stdout closing early is a normal exit for a streaming dump.
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "{} tape --cpu tests/fixtures/twitter_sample_small_records.json --lines | head -n 3",
+            assert_cmd::cargo::cargo_bin("cujson").to_str().unwrap()
+        ))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Broken pipe"), "stderr: {stderr}");
+}
+
 fn tempfile_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("cujson-cli-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

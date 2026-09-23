@@ -67,6 +67,32 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    // `println!`/`writeln!` to a closed stdout (e.g. `cujson tape F | head`)
+    // either returns an `io::Error` (explicit `write!` call sites, handled
+    // by `ignore_broken_pipe` below) or, for the many `println!` call
+    // sites in this file and in `verify.rs`, panics — `println!` has no
+    // other way to report a write failure. Catching that panic here and
+    // treating "Broken pipe" as a normal exit covers every stdout-writing
+    // command uniformly, without rewriting every `println!` to `writeln!`
+    // plus `?`.
+    match std::panic::catch_unwind(run) {
+        Ok(code) => code,
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(|s| s.as_str())
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("");
+            if msg.contains("Broken pipe") {
+                ExitCode::SUCCESS
+            } else {
+                std::panic::resume_unwind(payload)
+            }
+        }
+    }
+}
+
+fn run() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Info => cmd_info(),
@@ -227,18 +253,48 @@ fn cmd_tape(file: &PathBuf, lines: bool, cpu: bool) -> Result<(), CliError> {
 
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    writeln!(out, "idx\toffset\tchar\tpair")?;
-    let t = &doc.tape;
-    for i in 0..t.len() {
-        let offset = t.structural[i];
-        let ch = if offset >= 1 && (offset as usize - 1) < bytes.len() {
-            bytes[offset as usize - 1] as char
-        } else {
-            '?'
-        };
-        writeln!(out, "{i}\t{offset}\t{ch}\t{}", t.pair_pos[i])?;
-    }
+    let result = (|| -> std::io::Result<()> {
+        writeln!(out, "idx\toffset\tchar\tpair")?;
+        let t = &doc.tape;
+        for i in 0..t.len() {
+            let offset = t.structural[i];
+            let ch = tape_char(i, t.len(), offset, &bytes);
+            writeln!(out, "{i}\t{offset}\t{ch}\t{}", t.pair_pos[i])?;
+        }
+        Ok(())
+    })();
+    ignore_broken_pipe(result)?;
     Ok(())
+}
+
+/// Mirrors `Document::get_char` (`crates/cujson/src/tape/document.rs`) —
+/// the artificial wrapper entries at index `0`/`len-1` read as `[`/`]`,
+/// and an unescaped `\n` structural entry reads as `,` — so `cujson tape`'s
+/// dump matches `tape/FORMAT.md` §2 exactly, since it's the tool used to
+/// debug a `verify` failure against that same spec.
+fn tape_char(idx: usize, total: usize, offset: i32, input: &[u8]) -> char {
+    if idx == 0 {
+        return '[';
+    }
+    if idx + 1 == total {
+        return ']';
+    }
+    let pos = offset - 1;
+    if pos < 0 || pos as usize >= input.len() {
+        return '?';
+    }
+    let c = input[pos as usize];
+    if c == b'\n' { ',' } else { c as char }
+}
+
+/// Stdout being closed early (e.g. `cujson tape FILE | head`) is a normal
+/// exit for a streaming dump command, not a program error.
+fn ignore_broken_pipe(result: std::io::Result<()>) -> Result<(), CliError> {
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn cmd_bench(file: &PathBuf, repeat: usize) -> Result<(), CliError> {
