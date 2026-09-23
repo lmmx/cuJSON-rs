@@ -1572,9 +1572,15 @@ int32_t* Parser(uint8_t* open_close_GPU, int32_t** open_close_index_d,  int32_t*
     if(pairError){  // 0 no error, 1 error
         // Free allocations owned by this function, plus the caller's
         // open_close_GPU buffer (this function never returns it on this path).
+        // oc_idx (the open_close index buffer from Tokenize) and parsed_oc
+        // (the result buffer Tokenize allocated, never returned on this
+        // path) are also this function's responsibility here - neither
+        // caller sees them again once this throws.
         cudaFreeAsync(pairError_GPU, 0);
         cudaFreeAsync(open_close_GPU, 0);
         cudaFreeAsync(depth, 0);
+        cudaFreeAsync(oc_idx, 0);
+        cudaFreeAsync(parsed_oc, 0);
         throw cujson_error{cujson_err::UNBALANCED};
     }
 
@@ -1585,6 +1591,11 @@ int32_t* Parser(uint8_t* open_close_GPU, int32_t** open_close_index_d,  int32_t*
     cudaFreeAsync(pairError_GPU, 0);
     cudaFreeAsync(open_close_GPU, 0);
     cudaFreeAsync(depth, 0);
+    // oc_idx (Tokenize's open_close index buffer) is done being read after
+    // validate_expand_MathAPI_new2 above; parsed_oc is NOT freed here - it
+    // is the result buffer, returned to the caller as result_GPU, which
+    // frees it after copying it to host memory.
+    cudaFreeAsync(oc_idx, 0);
 
     return (int32_t*) parsed_oc;
     //arr(output): ROW 1 depth (not anymore) | ROW1 Real Character Index | ROW2 End Index (for each opening)
@@ -1678,6 +1689,7 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     // Copy results from device to host
     cudaMemcpy(1 + res_buff, result_GPU, sizeof(int32_t) * result_size, cudaMemcpyDeviceToHost);  // result 1
     cudaMemcpy(1 + res_buff + 1 + result_size, result_GPU + result_size, sizeof(int32_t) * result_size, cudaMemcpyDeviceToHost);  // result 2
+    cudaFreeAsync(result_GPU, 0);  // done with the device copy once it's on the host
 
     
     total_result_size += result_size;

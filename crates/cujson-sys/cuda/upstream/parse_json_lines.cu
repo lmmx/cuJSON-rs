@@ -1063,9 +1063,15 @@ int32_t* stage3_parser(uint8_t* open_close_bitmap, int32_t** open_close_index_d,
     if(pairError){  // 0 no error, 1 error
         // Free allocations owned by this function, plus the caller's
         // open_close_bitmap buffer (this function never returns it on this path).
+        // oc_idx (stage2_tokenizer's open_close index buffer) and parsed_oc
+        // (stage2_tokenizer's result buffer, never returned on this path)
+        // are also this function's responsibility here - neither caller
+        // sees them again once this throws.
         cudaFreeAsync(pairError_GPU, 0);
         cudaFreeAsync(open_close_bitmap, 0);
         cudaFreeAsync(depth, 0);
+        cudaFreeAsync(oc_idx, 0);
+        cudaFreeAsync(parsed_oc, 0);
         throw cujson_error{cujson_err::UNBALANCED};
     }
 
@@ -1074,6 +1080,11 @@ int32_t* stage3_parser(uint8_t* open_close_bitmap, int32_t** open_close_index_d,
     cudaFreeAsync(pairError_GPU, 0);
     cudaFreeAsync(open_close_bitmap, 0);
     cudaFreeAsync(depth, 0);
+    // oc_idx (stage2_tokenizer's open_close index buffer) is done being read
+    // after validate_expand above; parsed_oc is NOT freed here - it is the
+    // result buffer, returned to the caller as result_GPU, which already
+    // frees it (parse_json_lines:1243) after copying it to host memory.
+    cudaFreeAsync(oc_idx, 0);
 
     return (int32_t*) parsed_oc;
     //arr(output): ROW 1 depth (not anymore) | ROW1 Real Character Index | ROW2 End Index (for each opening)
