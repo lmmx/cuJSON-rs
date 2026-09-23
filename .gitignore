@@ -2,3 +2,5 @@ vendor/
 target/
 __pycache__/
 *.pyc
+# maturin develop / editable-install build output
+crates/cujson-py/python/cujson/*.so
