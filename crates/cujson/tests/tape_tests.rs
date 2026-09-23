@@ -173,3 +173,30 @@ proptest! {
         prop_assert_eq!(got, expected);
     }
 }
+
+// ---------------------------------------------------------------------
+// GPU tapes only define `pair_pos` at openers (FORMAT.md §3); every other
+// slot is whatever the pinned allocation held. Nothing may depend on them.
+
+#[test]
+fn navigation_and_depth_ignore_non_opener_pair_pos() {
+    let path = fixtures_dir().join("twitter_sample_large_record.json");
+    let bytes = std::fs::read(path).unwrap();
+    let clean = doc_from(&bytes, Mode::Standard);
+
+    let n = clean.tape.len();
+    let mut pair_pos: Vec<i32> = clean.tape.pair_pos.to_vec();
+    for (idx, slot) in pair_pos.iter_mut().enumerate().take(n - 1).skip(1) {
+        let byte = bytes[(clean.tape.structural[idx] - 1) as usize];
+        if byte != b'{' && byte != b'[' {
+            *slot = 0x5A5A_5A5A_u32 as i32;
+        }
+    }
+    let mut tape = clean.tape.clone();
+    tape.pair_pos = pair_pos.into();
+    let garbled = Document::new(Cow::Borrowed(&bytes[..]), tape);
+
+    assert_eq!(garbled.depth(), clean.depth());
+    assert!(clean.depth() > 1);
+    assert_eq!(garbled.root().to_value(), clean.root().to_value());
+}

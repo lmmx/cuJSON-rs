@@ -102,36 +102,6 @@ impl Tape {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-
-    /// Max bracket-nesting depth, computed on demand from `pair_pos` (a
-    /// value greater than its own index marks an opener; its matching
-    /// closer index ends that nesting level). **Has no GPU counterpart**:
-    /// upstream never writes `cuJSONResult::depth` (`tape/FORMAT.md` §4) —
-    /// task 10's differential test must exclude this value from comparison
-    /// entirely, not mask it.
-    pub fn depth(&self) -> i32 {
-        let n = self.len();
-        if n < 2 {
-            return 0;
-        }
-        let mut stack: Vec<usize> = Vec::new();
-        let mut max_depth = 0i32;
-        for i in 1..n - 1 {
-            while let Some(&close) = stack.last() {
-                if close == i {
-                    stack.pop();
-                } else {
-                    break;
-                }
-            }
-            let p = self.pair_pos[i];
-            if p > i as i32 {
-                stack.push(p as usize);
-                max_depth = max_depth.max(stack.len() as i32);
-            }
-        }
-        max_depth
-    }
 }
 
 /// Wrap a raw `cujson_tape` returned by `cujson_parse_standard`/

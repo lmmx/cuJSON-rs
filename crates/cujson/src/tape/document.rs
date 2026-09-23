@@ -130,6 +130,27 @@ impl<'a> Document<'a> {
 
     /// The document's first top-level value. For a JSON Lines document this
     /// is the first line only — use `lines()` to see the rest.
+    /// Max bracket-nesting depth of the real entries (the artificial wrapper
+    /// is not counted), from the tape characters alone. Deliberately does
+    /// not read `pair_pos`: on a GPU tape, `pair_pos` is only defined at
+    /// openers (`FORMAT.md` §3). Upstream never computes a depth
+    /// (`FORMAT.md` §4), so this has no GPU counterpart to compare against.
+    pub fn depth(&self) -> usize {
+        let mut depth = 0usize;
+        let mut max = 0usize;
+        for idx in 1..self.total().saturating_sub(1) {
+            match self.get_char(idx) {
+                b'{' | b'[' => {
+                    depth += 1;
+                    max = max.max(depth);
+                }
+                b'}' | b']' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        max
+    }
+
     pub fn root(&'a self) -> Node<'a> {
         self.read_value(0)
     }

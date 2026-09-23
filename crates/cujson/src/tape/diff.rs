@@ -150,15 +150,23 @@ mod tests {
         assert!(diff_tapes(input, &a, &b).is_none());
     }
 
+    fn with_slot(
+        storage: &crate::tape::TapeStorage,
+        idx: usize,
+        f: impl FnOnce(&mut i32),
+    ) -> crate::tape::TapeStorage {
+        let mut v = storage.to_vec();
+        f(&mut v[idx]);
+        v.into()
+    }
+
     #[test]
     fn structural_mismatch_detected() {
         let input = b"{\"a\":1}";
         let a = build_tape_cpu(input, Mode::Standard).unwrap();
         let mut b = build_tape_cpu(input, Mode::Standard).unwrap();
         // Corrupt one structural entry.
-        if let crate::tape::TapeStorage::Owned(boxed) = &mut b.structural {
-            boxed[1] += 1;
-        }
+        b.structural = with_slot(&b.structural, 1, |v| *v += 1);
         let diff = diff_tapes(input, &a, &b).unwrap();
         assert_eq!(diff.field, DiffField::Structural);
         assert_eq!(diff.index, 1);
@@ -171,9 +179,7 @@ mod tests {
         let mut b = build_tape_cpu(input, Mode::Standard).unwrap();
         // Corrupt a non-opener pair_pos slot (index 2 is ':'); must not be
         // reported, matching the undefined-slot exclusion.
-        if let crate::tape::TapeStorage::Owned(boxed) = &mut b.pair_pos {
-            boxed[2] = 999;
-        }
+        b.pair_pos = with_slot(&b.pair_pos, 2, |v| *v = 999);
         assert!(diff_tapes(input, &a, &b).is_none());
     }
 
@@ -182,9 +188,8 @@ mod tests {
         let input = b"{\"a\":1}";
         let a = build_tape_cpu(input, Mode::Standard).unwrap();
         let mut b = build_tape_cpu(input, Mode::Standard).unwrap();
-        if let crate::tape::TapeStorage::Owned(boxed) = &mut b.pair_pos {
-            boxed[1] += 1; // index 1 is '{', an opener
-        }
+        // Index 1 is `{`, an opener.
+        b.pair_pos = with_slot(&b.pair_pos, 1, |v| *v += 1);
         let diff = diff_tapes(input, &a, &b).unwrap();
         assert_eq!(diff.field, DiffField::PairPos);
         assert_eq!(diff.index, 1);
