@@ -1530,6 +1530,17 @@ int32_t* Parser(uint8_t* open_close_GPU, int32_t** open_close_index_d,  int32_t*
     int oc_cnt_32 = (oc_cnt + WORDS - 1) / WORDS;
     int numBlock_open_close_32 = (oc_cnt_32 + BLOCKSIZE - 1) / BLOCKSIZE;
 
+    // No brackets (a bare scalar, or a whitespace-only JSON Lines chunk):
+    // nothing to pair, and every launch below would have a zero-size grid.
+    // pair_pos is only defined at openers, so the structural row is the
+    // whole result. Frees match the success path.
+    if (oc_cnt == 0) {
+        cudaFreeAsync(open_close_GPU, 0);
+        cudaFreeAsync(oc_idx, 0);
+        result_size = structural_cnt;
+        return (int32_t*) parsed_oc;
+    }
+
     uint32_t* oc_1; // output 
     cudaMallocAsync(&oc_1, oc_cnt_32*sizeof(uint32_t), 0); 
 
