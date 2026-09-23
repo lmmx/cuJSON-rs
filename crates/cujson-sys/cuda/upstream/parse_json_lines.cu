@@ -1292,6 +1292,10 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
 
     
     resultBuffer = mergeChunks(res_buf_arrays, &parsed_tree, parsed_tree.chunkCount);
+    // mergeChunks copied every chunk's pinned result into resultBuffer.
+    for (int i = 0; i < parsed_tree.chunkCount; i++) {
+        cudaFreeHost(res_buf_arrays[i]);
+    }
 
 
     // parsed tree struct generation
