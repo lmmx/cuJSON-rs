@@ -30,7 +30,13 @@ struct RawStructure {
 /// their 1-based offsets into the document that starts at `base` (0-based),
 /// the (opener, closer) index pairs into that offsets list, and the max
 /// bracket-nesting depth.
-fn scan_structural(bytes: &[u8], base: usize) -> Result<RawStructure, Error> {
+///
+/// `mark_newline` mirrors the one difference between the Standard and Lines
+/// `bitMapCreatorSimd` variants (`tape/FORMAT.md` §1/§5): when set, an
+/// unescaped `\n` outside a string is folded into the *same* structural
+/// bitmap as `{}[]:,` (masked by the same in-string exclusion), not treated
+/// specially.
+fn scan_structural(bytes: &[u8], base: usize, mark_newline: bool) -> Result<RawStructure, Error> {
     let mut offsets = Vec::new();
     let mut pairs = Vec::new();
     let mut stack: Vec<(u8, usize)> = Vec::new();
@@ -71,6 +77,9 @@ fn scan_structural(bytes: &[u8], base: usize) -> Result<RawStructure, Error> {
             b':' | b',' => {
                 offsets.push((base + i + 1) as i32);
             }
+            b'\n' if mark_newline => {
+                offsets.push((base + i + 1) as i32);
+            }
             _ => {}
         }
     }
@@ -87,51 +96,24 @@ fn scan_structural(bytes: &[u8], base: usize) -> Result<RawStructure, Error> {
     })
 }
 
-/// JSON Lines: split on raw `\n` bytes (safe because JSON forbids a literal
-/// newline inside a string — any unescaped `\n` in valid input is a line
-/// separator), scan each non-blank line independently, and splice in a
-/// structural entry at each separating newline so it reads back as a comma
-/// (`tape/FORMAT.md` §5, matching `getChar`'s `'\n' -> ','` translation).
+/// JSON Lines: the kernel does not split the input by line at all — every
+/// chunk (an implementation detail of GPU parallelism, see `tape/FORMAT.md`
+/// §5's chunk-boundary note) is tokenized with the *same* structural bitmap
+/// as Standard mode except that an unescaped `\n` outside a string is also
+/// structural (`bitMapCreatorSimd` in `parse_json_lines.cu`, §1/§5). Bracket
+/// pairing is unaffected: brackets never span a `\n` in valid per-line JSON,
+/// so a single whole-input scan (stack returns to depth 0 at every `\n`)
+/// produces the same pairing as the kernel's per-chunk pairing pass.
+///
+/// This single-pass scan is what reproduces the kernel exactly for the four
+/// newline cases documented in `tape/FORMAT.md` §5: a trailing `\n` at EOF
+/// and a blank line (`\n\n`) each get their own structural entry (no
+/// skipping), a bare `\r` before `\n` is never itself structural, and chunk
+/// boundaries (a CPU-builder-only non-concept) can't perturb the result
+/// because they always fall immediately after a complete line in the real
+/// loader (`load_file.cu`'s line-offset chunking).
 fn build_lines(input: &[u8]) -> Result<RawStructure, Error> {
-    let mut offsets = Vec::new();
-    let mut pairs = Vec::new();
-    let mut max_depth = 0i32;
-    let mut cursor = 0usize;
-    let mut pending_newline: Option<i32> = None;
-    let n = input.len();
-
-    loop {
-        let rest = &input[cursor..];
-        let (line_end, next_cursor, nl_abs) = match rest.iter().position(|&b| b == b'\n') {
-            Some(r) => (cursor + r, cursor + r + 1, Some(cursor + r)),
-            None => (n, n + 1, None),
-        };
-        let line = &input[cursor..line_end];
-        if !line.iter().all(u8::is_ascii_whitespace) {
-            if let Some(pending) = pending_newline.take() {
-                offsets.push(pending);
-            }
-            let scan = scan_structural(line, cursor)?;
-            let index_base = offsets.len();
-            for &(a, b) in &scan.pairs {
-                pairs.push((index_base + a, index_base + b));
-            }
-            offsets.extend(scan.offsets);
-            max_depth = max_depth.max(scan.depth);
-        }
-        if let Some(nl) = nl_abs {
-            pending_newline = Some((nl + 1) as i32);
-        }
-        if next_cursor > n {
-            break;
-        }
-        cursor = next_cursor;
-    }
-    Ok(RawStructure {
-        offsets,
-        pairs,
-        depth: max_depth,
-    })
+    scan_structural(input, 0, true)
 }
 
 /// Build a tape from `input`, matching `tape/FORMAT.md` byte for byte.
@@ -146,7 +128,7 @@ pub fn build_tape_cpu(input: &[u8], mode: Mode) -> Result<Tape, Error> {
         pairs,
         depth,
     } = match mode {
-        Mode::Standard => scan_structural(input, 0)?,
+        Mode::Standard => scan_structural(input, 0, false)?,
         Mode::Lines => build_lines(input)?,
     };
 

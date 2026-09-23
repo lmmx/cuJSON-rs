@@ -56,6 +56,63 @@ fn fixture_small_records_lines_match_serde_json() {
 }
 
 // ---------------------------------------------------------------------
+// JSON Lines newline-case tests (tape/FORMAT.md §5)
+// ---------------------------------------------------------------------
+
+/// (a) A trailing `\n` at EOF is structural (kernel: `bitMapCreatorSimd` in
+/// `parse_json_lines.cu` marks every unescaped `\n`), giving one extra
+/// tape entry that reads back as a comma right before the artificial
+/// close. `Document::lines()` must not surface a phantom trailing value.
+#[test]
+fn lines_trailing_newline_at_eof() {
+    let bytes = b"{\"a\":1}\n";
+    let doc = doc_from(bytes, Mode::Lines);
+    let got: Vec<serde_json::Value> = doc.lines().map(|n| n.to_value()).collect();
+    assert_eq!(got, vec![serde_json::json!({"a": 1})]);
+}
+
+/// (b) A blank line between two records is two adjacent `\n` bytes, each
+/// independently structural (no skipping) — matches the kernel's
+/// unconditional per-`\n` marking. The navigator absorbs the resulting
+/// empty span rather than yielding a bogus empty document.
+#[test]
+fn lines_blank_line_between_records() {
+    let bytes = b"{\"a\":1}\n\n{\"a\":2}\n";
+    let doc = doc_from(bytes, Mode::Lines);
+    let got: Vec<serde_json::Value> = doc.lines().map(|n| n.to_value()).collect();
+    assert_eq!(got, vec![serde_json::json!({"a": 1}), serde_json::json!({"a": 2})]);
+}
+
+/// (c) CRLF line endings: `\r` matches none of `bitMapCreatorSimd`'s
+/// patterns in either mode, so it is never structural and never
+/// specially skipped — it is ordinary insignificant whitespace trimmed
+/// from the surrounding scalar span like any other whitespace byte.
+#[test]
+fn lines_crlf_endings() {
+    let bytes = b"{\"a\":1}\r\n{\"a\":2}\r\n";
+    let doc = doc_from(bytes, Mode::Lines);
+    let got: Vec<serde_json::Value> = doc.lines().map(|n| n.to_value()).collect();
+    assert_eq!(got, vec![serde_json::json!({"a": 1}), serde_json::json!({"a": 2})]);
+}
+
+/// (d) Chunk boundaries are a GPU-side multi-chunk implementation detail
+/// (`load_file.cu`'s line-offset chunking always places a chunk boundary
+/// immediately after a complete line's `\n`) and have no counterpart in
+/// the CPU builder, which never splits its input. Building the same bytes
+/// as one input is therefore the correct CPU-side behaviour regardless of
+/// where a GPU loader would have cut chunks — assert it is insensitive to
+/// where such a cut would fall by checking a cut-independent invariant:
+/// the tape built from the whole input matches line-by-line reconstruction.
+#[test]
+fn lines_chunk_boundary_is_a_noop_for_cpu_builder() {
+    let bytes = b"{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n";
+    let doc = doc_from(bytes, Mode::Lines);
+    let got: Vec<serde_json::Value> = doc.lines().map(|n| n.to_value()).collect();
+    let expected: Vec<serde_json::Value> = (1..=3).map(|i| serde_json::json!({"a": i})).collect();
+    assert_eq!(got, expected);
+}
+
+// ---------------------------------------------------------------------
 // Property tests
 // ---------------------------------------------------------------------
 

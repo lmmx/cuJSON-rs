@@ -136,8 +136,20 @@ impl<'a> Document<'a> {
 
     /// Iterate the top-level values of a JSON Lines document (or the single
     /// root value of a standard document, as a one-element iterator).
+    ///
+    /// The tape itself marks *every* unescaped `\n` structural, matching the
+    /// kernel exactly (`tape/FORMAT.md` §5): a trailing `\n` at EOF and each
+    /// `\n` of a blank line each get their own structural entry, read back
+    /// as `,` by `get_char`. That can put two comma-like separators back to
+    /// back with nothing between them. This iterator — a navigator-layer
+    /// convenience, not part of the tape format itself — skips the
+    /// resulting empty scalar spans rather than yielding a phantom
+    /// zero-length "value", so blank lines and a trailing newline are
+    /// silently absorbed instead of appearing as bogus documents.
     pub fn lines(&'a self) -> impl Iterator<Item = Node<'a>> + 'a {
-        children_iter(self, 0, self.total() - 1)
+        children_iter(self, 0, self.total() - 1).filter(|node| {
+            !matches!(node.repr, NodeRepr::Scalar { lo, hi } if node.doc.scalar_bytes(lo, hi).is_empty())
+        })
     }
 
     /// Resolve an RFC 6901 JSON Pointer against the root value.
