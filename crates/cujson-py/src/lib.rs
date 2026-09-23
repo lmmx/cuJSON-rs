@@ -37,7 +37,7 @@ fn extract_bytes(ob: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
 }
 
 /// A parsed document: owns its input bytes and GPU-produced tape.
-#[pyclass(frozen)]
+#[pyclass(frozen, module = "cujson")]
 struct Document {
     doc: cujson::Document<'static>,
     /// Built by `parse_lines`: the document is the sequence of its lines.

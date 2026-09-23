@@ -21,6 +21,7 @@ fn make_type<'py>(
     let builtins = PyModule::import(py, "builtins")?;
     let type_fn = builtins.getattr("type")?;
     let dict = PyDict::new(py);
+    dict.set_item("__module__", "cujson")?;
     let cls = type_fn.call1((name, bases, dict))?;
     cls.cast_into::<PyType>()
         .map_err(|e| pyo3::PyErr::from_value(e.into_inner()))
