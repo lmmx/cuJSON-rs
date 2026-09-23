@@ -21,6 +21,8 @@ pub enum Engine {
     Cujson,
     /// cuJSON GPU parse, rayon tape walk
     CujsonPar,
+    /// cuJSON's CPU-reference tape builder, one-thread tape walk (isolates the walk from the GPU)
+    CujsonRef,
 }
 
 impl Engine {
@@ -58,7 +60,7 @@ pub fn run_batch(engine: Engine, level: Level, batch: &Batch) -> Result<Run, Str
         Engine::Simd | Engine::SimdPar | Engine::SimdBuf | Engine::SimdBufPar => {
             Ok(run_simd(engine, level, batch))
         }
-        Engine::Cujson | Engine::CujsonPar => run_cujson(engine, level, batch),
+        Engine::Cujson | Engine::CujsonPar | Engine::CujsonRef => run_cujson(engine, level, batch),
     }
 }
 
@@ -110,14 +112,23 @@ fn run_simd(engine: Engine, level: Level, batch: &Batch) -> Run {
 
 fn run_cujson(engine: Engine, level: Level, batch: &Batch) -> Result<Run, String> {
     let t = Instant::now();
-    let doc = cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
-        .map_err(|e| e.to_string())?;
+    let doc = if engine == Engine::CujsonRef {
+        cujson::cpu::parse(&batch.bytes, cujson::cpu::Mode::Lines).map_err(|e| e.to_string())?
+    } else {
+        cujson::parse_lines(&batch.bytes, cujson::LinesOptions::default())
+            .map_err(|e| e.to_string())?
+    };
     let parse = t.elapsed();
+    let parse_name = if engine == Engine::CujsonRef {
+        "cpu tape build"
+    } else {
+        "gpu parse"
+    };
     if level == Level::Parse {
         let t = Instant::now();
         drop(black_box(doc));
         return Ok(Run {
-            phases: vec![("gpu parse", parse), ("free", t.elapsed())],
+            phases: vec![(parse_name, parse), ("free", t.elapsed())],
             rows: batch.rows as u64,
             hash: 0,
         });
@@ -138,7 +149,7 @@ fn run_cujson(engine: Engine, level: Level, batch: &Batch) -> Result<Run, String
     let t = Instant::now();
     drop(black_box(doc));
     Ok(Run {
-        phases: vec![("gpu parse", parse), ("walk", walk), ("free", t.elapsed())],
+        phases: vec![(parse_name, parse), ("walk", walk), ("free", t.elapsed())],
         rows,
         hash,
     })
