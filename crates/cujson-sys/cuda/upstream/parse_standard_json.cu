@@ -1,5 +1,6 @@
 #include "parse_standard_json.h"         // Include the standard parse header
 #include "cujson_types.h"
+#include "cujson_error.h"
 
 
 // prev1            --> 4 character
@@ -1568,15 +1569,19 @@ int32_t* Parser(uint8_t* open_close_GPU, int32_t** open_close_index_d,  int32_t*
     cudaMemcpyAsync(&pairError, pairError_GPU, sizeof(bool), cudaMemcpyDeviceToHost, 0);
 
     if(pairError){  // 0 no error, 1 error
-        printf("error found!");
-        exit(0);
+        // Free allocations owned by this function, plus the caller's
+        // open_close_GPU buffer (this function never returns it on this path).
+        cudaFreeAsync(pairError_GPU, 0);
+        cudaFreeAsync(open_close_GPU, 0);
+        cudaFreeAsync(depth, 0);
+        throw cujson_error{CUJSON_ERR_UNBALANCED};
     }
 
 
 
     result_size = structural_cnt;
 
-
+    cudaFreeAsync(pairError_GPU, 0);
     cudaFreeAsync(open_close_GPU, 0);
     cudaFreeAsync(depth, 0);
 
@@ -1626,7 +1631,8 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     bool isValidUTF8 = UTF8Validation(reinterpret_cast<uint32_t *>(d_jsonContent), size_32);
     cudaStreamSynchronize(0);
     if(!isValidUTF8) {
-        exit(0);
+        cudaFree(d_jsonContent);
+        throw cujson_error{CUJSON_ERR_UTF8};
     }
 
 
@@ -1642,13 +1648,20 @@ cuJSONResult parse_standard_json(cuJSONInput input) {
     // Structure Recognition
     int32_t* result_GPU;
     int result_size;
-    result_GPU = Parser(open_close_GPU, 
-                        (int32_t **)(&open_close_index_GPU), 
-                        (int32_t **)(&tokens_index_GPU), 
-                        last_index_tokens_open_close, 
-                        last_index_tokens, 
-                        result_size,
-                        lastStructuralIndex);
+    try {
+        result_GPU = Parser(open_close_GPU,
+                            (int32_t **)(&open_close_index_GPU),
+                            (int32_t **)(&tokens_index_GPU),
+                            last_index_tokens_open_close,
+                            last_index_tokens,
+                            result_size,
+                            lastStructuralIndex);
+    } catch (const cujson_error&) {
+        // Parser() already freed its own allocations and open_close_GPU;
+        // d_jsonContent is still live in this frame.
+        cudaFree(d_jsonContent);
+        throw;
+    }
 
     // output_size = (uint32_t) result_size * ROW2;
     cudaFree(d_jsonContent); // Free the input memory on GPU

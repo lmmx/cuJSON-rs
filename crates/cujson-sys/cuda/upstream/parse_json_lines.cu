@@ -1,5 +1,6 @@
 #include "parse_json_lines.h"         // Include the standard parse header
 #include "cujson_types.h"
+#include "cujson_error.h"
 
 
 // prev1            --> 4 character
@@ -1059,13 +1060,17 @@ int32_t* stage3_parser(uint8_t* open_close_bitmap, int32_t** open_close_index_d,
     cudaMemcpyAsync(&pairError, pairError_GPU, sizeof(bool), cudaMemcpyDeviceToHost, 0);
 
     if(pairError){  // 0 no error, 1 error
-        // printf("error found!");
-        cout << "\033[1;31m Error: Invalid JSON structure detected in the input data. \033[0m\n";
-        exit(0);
+        // Free allocations owned by this function, plus the caller's
+        // open_close_bitmap buffer (this function never returns it on this path).
+        cudaFreeAsync(pairError_GPU, 0);
+        cudaFreeAsync(open_close_bitmap, 0);
+        cudaFreeAsync(depth, 0);
+        throw cujson_error{CUJSON_ERR_UNBALANCED};
     }
 
     result_size = structural_cnt;
 
+    cudaFreeAsync(pairError_GPU, 0);
     cudaFreeAsync(open_close_bitmap, 0);
     cudaFreeAsync(depth, 0);
 
@@ -1176,9 +1181,13 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
         bool isValidUTF8 = stage1_UTF8Validator(reinterpret_cast<uint32_t *>(d_jsonContent), size_32);
         cudaStreamSynchronize(0);
         if(!isValidUTF8) {
-            std::cout << "\033[1;31m Error: Invalid UTF-8 encoding in the chunk at index " << i << ". \033[0m\n";
             cudaFree(d_jsonContent);
-            exit(0);
+            // Chunks [0, i) already copied their results into pinned
+            // res_buf_arrays[0..i-1]; free those before propagating.
+            for (size_t j = 0; j < i; j++) {
+                cudaFreeHost(res_buf_arrays[j]);
+            }
+            throw cujson_error{CUJSON_ERR_UTF8};
         }
 
         // Tokenization
@@ -1194,13 +1203,24 @@ cuJSONResult parse_json_lines(cuJSONLinesInput input) {
         // Structure Recognition
         int32_t* result_GPU;
         int result_size = 0;
-        result_GPU = stage3_parser(open_close_GPU, 
-                            (int32_t **)(&open_close_index_GPU), 
-                            (int32_t **)(&tokens_index_GPU), 
-                            last_index_tokens_open_close, 
-                            last_index_tokens, 
-                            result_size,
-                            lastStructuralIndex);
+        try {
+            result_GPU = stage3_parser(open_close_GPU,
+                                (int32_t **)(&open_close_index_GPU),
+                                (int32_t **)(&tokens_index_GPU),
+                                last_index_tokens_open_close,
+                                last_index_tokens,
+                                result_size,
+                                lastStructuralIndex);
+        } catch (const cujson_error&) {
+            // stage3_parser already freed its own allocations and
+            // open_close_GPU; d_jsonContent and chunks [0, i)'s results
+            // are still live in this frame.
+            cudaFree(d_jsonContent);
+            for (size_t j = 0; j < i; j++) {
+                cudaFreeHost(res_buf_arrays[j]);
+            }
+            throw;
+        }
 
 
         // Device to Host Memory Copy
