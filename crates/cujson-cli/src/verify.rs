@@ -39,7 +39,10 @@ fn escape_pointer_token(tok: &str) -> String {
 /// `to_value vs serde_json` FAIL always names where the values disagree
 /// instead of just "values differ".
 #[cfg(any(feature = "cuda", test))]
-fn first_value_diff(a: &serde_json::Value, b: &serde_json::Value) -> Option<(String, String, String)> {
+fn first_value_diff(
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+) -> Option<(String, String, String)> {
     fn go(pointer: &str, a: &serde_json::Value, b: &serde_json::Value) -> Option<String> {
         use serde_json::Value;
         match (a, b) {
@@ -91,7 +94,11 @@ fn first_value_diff(a: &serde_json::Value, b: &serde_json::Value) -> Option<(Str
     } else {
         pointer
     };
-    Some((pointer, truncate(&av.to_string()), truncate(&bv.to_string())))
+    Some((
+        pointer,
+        truncate(&av.to_string()),
+        truncate(&bv.to_string()),
+    ))
 }
 
 #[cfg(any(feature = "cuda", test))]
@@ -100,9 +107,11 @@ fn resolve_pointer<'v>(v: &'v serde_json::Value, pointer: &str) -> Option<&'v se
 }
 
 #[cfg(feature = "cuda")]
-const LARGE_RECORD: &[u8] = include_bytes!("../../../tests/fixtures/twitter_sample_large_record.json");
+const LARGE_RECORD: &[u8] =
+    include_bytes!("../../../tests/fixtures/twitter_sample_large_record.json");
 #[cfg(feature = "cuda")]
-const SMALL_RECORDS: &[u8] = include_bytes!("../../../tests/fixtures/twitter_sample_small_records.json");
+const SMALL_RECORDS: &[u8] =
+    include_bytes!("../../../tests/fixtures/twitter_sample_small_records.json");
 
 #[cfg(feature = "cuda")]
 struct Checks {
@@ -113,7 +122,10 @@ struct Checks {
 #[cfg(feature = "cuda")]
 impl Checks {
     fn new() -> Self {
-        Checks { total: 0, failed: 0 }
+        Checks {
+            total: 0,
+            failed: 0,
+        }
     }
 
     fn record(&mut self, label: &str, ok: bool, detail: Option<&str>) {
@@ -184,7 +196,11 @@ pub fn run(file: Option<PathBuf>, lines: bool, chunk_bytes: Option<usize>) -> Ex
                 }
             }
             None => {
-                verify_standard(&mut checks, "twitter_sample_large_record.json (standard)", LARGE_RECORD);
+                verify_standard(
+                    &mut checks,
+                    "twitter_sample_large_record.json (standard)",
+                    LARGE_RECORD,
+                );
                 verify_lines(
                     &mut checks,
                     "twitter_sample_small_records.json (lines, one chunk)",
@@ -231,7 +247,11 @@ fn verify_standard(checks: &mut Checks, label: &str, bytes: &[u8]) {
     let cpu = match cujson::cpu::parse(bytes, cujson::cpu::Mode::Standard) {
         Ok(d) => d,
         Err(e) => {
-            checks.record(&format!("{label}: CPU reference parse"), false, Some(&e.to_string()));
+            checks.record(
+                &format!("{label}: CPU reference parse"),
+                false,
+                Some(&e.to_string()),
+            );
             return;
         }
     };
@@ -281,7 +301,11 @@ fn verify_lines(checks: &mut Checks, label: &str, bytes: &[u8], chunk_bytes: usi
     let cpu = match cujson::cpu::parse(bytes, cujson::cpu::Mode::Lines) {
         Ok(d) => d,
         Err(e) => {
-            checks.record(&format!("{label}: CPU reference parse"), false, Some(&e.to_string()));
+            checks.record(
+                &format!("{label}: CPU reference parse"),
+                false,
+                Some(&e.to_string()),
+            );
             return;
         }
     };
@@ -393,7 +417,11 @@ fn verify_error_recovery(checks: &mut Checks) {
         let cpu = match cujson::cpu::parse(bytes, mode) {
             Ok(d) => d,
             Err(e) => {
-                checks.record(label, false, Some(&format!("CPU reference parse failed: {e}")));
+                checks.record(
+                    label,
+                    false,
+                    Some(&format!("CPU reference parse failed: {e}")),
+                );
                 return;
             }
         };

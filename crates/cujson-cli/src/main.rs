@@ -16,7 +16,11 @@ mod verify;
 const EXIT_NO_CUDA: u8 = 2;
 
 #[derive(Parser)]
-#[command(name = "cujson", version, about = "GPU JSON parsing, from the command line")]
+#[command(
+    name = "cujson",
+    version,
+    about = "GPU JSON parsing, from the command line"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -263,12 +267,19 @@ fn cmd_parse(
 
     if time {
         // Exclude the first run (warm-up / context init) when repeat > 1.
-        let warm = if times.len() > 1 { &times[1..] } else { &times[..] };
+        let warm = if times.len() > 1 {
+            &times[1..]
+        } else {
+            &times[..]
+        };
         let mut sorted: Vec<_> = warm.to_vec();
         sorted.sort();
         let min = sorted.first().copied().unwrap_or_default();
         let median = sorted[sorted.len() / 2];
-        println!("parse time: min={min:?} median={median:?} (n={})", sorted.len());
+        println!(
+            "parse time: min={min:?} median={median:?} (n={})",
+            sorted.len()
+        );
     }
     Ok(())
 }
@@ -350,12 +361,15 @@ fn cmd_bench(file: &PathBuf, repeat: usize) -> Result<(), CliError> {
     let mut serde_times = Vec::with_capacity(repeat);
     for _ in 0..repeat {
         let start = Instant::now();
-        let v: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| CliError::Other(e.to_string()))?;
+        let v: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| CliError::Other(e.to_string()))?;
         std::hint::black_box(&v);
         serde_times.push(start.elapsed());
     }
 
-    fn summarize(mut times: Vec<std::time::Duration>) -> (std::time::Duration, std::time::Duration) {
+    fn summarize(
+        mut times: Vec<std::time::Duration>,
+    ) -> (std::time::Duration, std::time::Duration) {
         times.sort();
         let min = times[0];
         let median = times[times.len() / 2];

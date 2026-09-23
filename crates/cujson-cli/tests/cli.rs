@@ -138,7 +138,10 @@ fn verify_without_cuda_feature_gives_clean_message_and_exit_2() {
 fn info_with_cuda_feature_but_no_driver_errors_cleanly() {
     let assert = cli().arg("info").assert().failure();
     let output = assert.get_output();
-    assert!(!output.stderr.is_empty(), "expected an error message on stderr");
+    assert!(
+        !output.stderr.is_empty(),
+        "expected an error message on stderr"
+    );
 }
 
 #[cfg(feature = "cuda")]

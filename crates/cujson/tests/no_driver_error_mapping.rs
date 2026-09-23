@@ -10,7 +10,10 @@
 fn assert_cuda_or_no_device(err: cujson::Error, label: &str) {
     match err {
         cujson::Error::Cuda { code, .. } => {
-            assert!(code > 0, "{label}: Cuda error with non-positive code {code}");
+            assert!(
+                code > 0,
+                "{label}: Cuda error with non-positive code {code}"
+            );
         }
         cujson::Error::NoDevice => {}
         other => panic!("{label}: expected Error::Cuda or Error::NoDevice, got {other:?}"),
