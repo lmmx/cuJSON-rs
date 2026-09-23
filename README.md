@@ -35,3 +35,25 @@ Release artifacts: the `cujson` Python wheel and a `cujson-cu13-*.tar.gz` CLI ta
 built with CUDA 13, and the `cujson-sys`/`cujson` crates on crates.io. On CUDA 12, build from a
 checkout instead: `pip install ./crates/cujson-py` or `cargo build --release -p cujson-cli
 --features cuda` (with CUDA 12's `nvcc` on `PATH`).
+
+### Making a release
+
+One version, `[workspace.package] version` in the root `Cargo.toml`, covers every crate and the
+Python wheel (maturin reads it). From an up-to-date, clean `master`:
+
+```
+just release          # or: just release minor / just release major
+```
+
+This runs `just check`, bumps the version with `cargo set-version`, commits
+`chore(release): bump -> vX.Y.Z`, tags `vX.Y.Z`, and pushes both. The tag starts `release.yml`,
+which publishes to PyPI, crates.io and a GitHub release. To rehearse, run `release.yml` from the
+Actions tab: manual runs default to a dry run that builds everything and publishes nothing.
+
+One-time setup before the first release:
+
+- PyPI: add a trusted publisher for project `cujson` (owner `lmmx`, repository `cuJSON-rs`,
+  workflow `release.yml`, environment `pypi`), and create the `pypi` environment in the
+  repository settings.
+- crates.io: add a `CARGO_REGISTRY_TOKEN` repository secret.
+- Local tools: `just`, `cargo set-version` (cargo-edit), `jq`, `echo-comment`.
